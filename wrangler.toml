@@ -1,0 +1,12 @@
+# Cloudflare Pages configuration for EntraCompass.
+name = "entracompass"
+compatibility_date = "2026-09-01"
+pages_build_output_dir = "dist"
+
+# Workers AI binding, used by the optional assistant (functions/ai/ask.js).
+[ai]
+binding = "AI"
+
+[vars]
+# Comma-separated origins allowed to call /ai/ask.
+ALLOWED_ORIGIN = "https://entracompass.aboutcloud.io,https://entracompass.pages.dev"

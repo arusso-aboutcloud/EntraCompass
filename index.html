@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EntraCompass - Conditional Access Business Posture</title>
+  <meta name="description" content="Assess Microsoft Entra Conditional Access from a business, DLP and security standpoint: exceptions, business app impact, named locations, workload identities, what-if, and an executive report. Browser-only and read-only." />
+  <link rel="canonical" href="https://entracompass.aboutcloud.io" />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://entracompass.aboutcloud.io" />
+  <meta property="og:title" content="EntraCompass - Conditional Access Business Posture" />
+  <meta property="og:description" content="Which business apps sit outside protection, which exceptions are justified, and what breaks if you tighten. Executive report included. Browser-only." />
+  <meta property="og:site_name" content="aboutcloud.io" />
+  <link rel="icon" href="/aboutcloud-favicon.ico" sizes="any" />
+  <link rel="icon" type="image/png" href="/aboutcloud-icon-256.png" />
+  <link rel="apple-touch-icon" href="/aboutcloud-icon-256.png" />
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- Landing / setup -->
+    <section id="landing" class="screen">
+      <header class="topbar">
+        <a class="brand" href="https://www.aboutcloud.io" target="_blank" rel="noopener">
+          <img src="/logo-icon-dark-theme.png" alt="" width="28" height="28" />
+          <span>Aboutcloud</span>
+        </a>
+        <span class="topbar-sub">Microsoft Identity Tools</span>
+      </header>
+
+      <div class="landing-grid">
+        <div class="hero">
+          <div class="eyebrow">Conditional Access posture, for the business</div>
+          <h1>EntraCompass</h1>
+          <p class="lead">
+            Find out which business applications sit outside protection, which exceptions are justified,
+            what would break if you tighten, and how well company data is protected on unmanaged devices.
+            Then hand management a clear report.
+          </p>
+          <ul class="hero-points">
+            <li><b>Business apps first.</b> SAML, App Proxy and SaaS apps mapped against every policy.</li>
+            <li><b>Exception inventory.</b> Every exclusion classified: gap, review, cleanup, stale or justified.</li>
+            <li><b>DLP lens.</b> Session controls, managed devices, authentication contexts, guests.</li>
+            <li><b>Named locations and workload identities</b> checked for hidden bypasses.</li>
+            <li><b>What-if.</b> Test a sign-in scenario before you change a policy.</li>
+            <li><b>Executive report</b> that answers management questions in plain language.</li>
+          </ul>
+          <p class="privacy-note">
+            Runs entirely in your browser. Read-only Microsoft Graph access through your own app registration (PKCE, no secrets).
+            Nothing is stored on a server. Data lives in this browser tab and is cleared when you close it.
+          </p>
+        </div>
+
+        <div class="card setup-card">
+          <h2>Connect your tenant</h2>
+          <p class="muted">Uses an app registration in your own tenant. <a href="#" data-action="toggle-setup-help">How to create it</a></p>
+          <div id="setup-help" class="setup-help hidden">
+            <ol>
+              <li>Entra admin center &gt; App registrations &gt; New registration. Single tenant.</li>
+              <li>Platform: <b>Single-page application</b> (not Web). Redirect URI: <code id="redirect-uri-hint"></code></li>
+              <li>API permissions &gt; Microsoft Graph &gt; Delegated:
+                <code>Policy.Read.All</code>, <code>Application.Read.All</code>, <code>Directory.Read.All</code>,
+                <code>AuditLog.Read.All</code>, <code>User.Read</code>. Then <b>Grant admin consent</b>.</li>
+              <li>Copy the Application (client) ID and Directory (tenant) ID below.</li>
+            </ol>
+            <p class="muted small">Or run <code>infra/New-EntraCompassApp.ps1</code> from the GitHub repo to create it for you.</p>
+          </div>
+          <form id="setup-form" autocomplete="off">
+            <label>Directory (tenant) ID
+              <input id="cfg-tenant" required placeholder="00000000-0000-0000-0000-000000000000" spellcheck="false" />
+            </label>
+            <label>Application (client) ID
+              <input id="cfg-client" required placeholder="00000000-0000-0000-0000-000000000000" spellcheck="false" />
+            </label>
+            <div id="setup-error" class="alert alert-danger hidden" role="alert"></div>
+            <button type="submit" class="btn btn-primary btn-block">Sign in and scan</button>
+          </form>
+          <div class="or"><span>or</span></div>
+          <button class="btn btn-ghost btn-block" data-action="demo">Explore with sample data</button>
+          <p class="muted small center">Sign-in needs a Conditional Access Administrator, Security Reader or Global Reader account.</p>
+        </div>
+      </div>
+      <footer class="footer">
+        Free and open source. <a href="https://github.com/arusso-aboutcloud/EntraCompass" target="_blank" rel="noopener">GitHub</a>
+        &middot; Built by <a href="https://www.aboutcloud.io" target="_blank" rel="noopener">aboutcloud.io</a>
+      </footer>
+    </section>
+
+    <!-- Scanning -->
+    <section id="scanning" class="screen hidden">
+      <div class="scan-box">
+        <div class="spinner" aria-hidden="true"></div>
+        <h2>Scanning your tenant</h2>
+        <p id="scan-status" class="muted" aria-live="polite">Starting...</p>
+        <p class="muted small">Read-only. Large tenants can take a few minutes; throttled requests are retried automatically.</p>
+      </div>
+    </section>
+
+    <!-- Dashboard -->
+    <section id="dashboard" class="screen hidden">
+      <header class="topbar dash-topbar">
+        <div class="brand">
+          <img src="/logo-icon-dark-theme.png" alt="" width="24" height="24" />
+          <span>EntraCompass</span>
+          <span id="tenant-name" class="tenant-chip"></span>
+          <span id="demo-chip" class="tenant-chip demo hidden">Sample data</span>
+        </div>
+        <div class="topbar-actions">
+          <button class="btn btn-ghost btn-sm" data-action="rescan" id="rescan-btn">Re-scan</button>
+          <button class="btn btn-ghost btn-sm" data-action="signout">Sign out</button>
+        </div>
+      </header>
+      <nav class="tabs" role="tablist" id="tabs"></nav>
+      <main id="view" class="view"></main>
+    </section>
+  </div>
+
+  <!-- Printable executive report is rendered here -->
+  <div id="print-root"></div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

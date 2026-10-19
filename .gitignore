@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.wrangler/
+.dev.vars
+audit-result.json
+*.local.json
+.DS_Store

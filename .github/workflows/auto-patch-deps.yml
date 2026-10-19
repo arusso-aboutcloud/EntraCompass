@@ -1,0 +1,95 @@
+name: Auto-patch dependencies
+
+# Weekly safety net for security advisories that Dependabot cannot fix,
+# typically TRANSITIVE dependencies pinned by a parent package (for example
+# inside wrangler). Each vulnerable leaf package is overridden to the newest
+# version within its current major (semver-safe), a PR is opened, CI is
+# triggered on it, and auto-merge is enabled. Anything that needs a major bump
+# is never applied automatically: it is tracked in one issue for review.
+#
+# Uses only the built-in GITHUB_TOKEN. Pull requests opened with it do not
+# trigger workflows by themselves, so the CI and Security Scan workflows are
+# dispatched on the branch explicitly; their checks attach to the PR commit.
+
+on:
+  schedule:
+    - cron: '0 6 * * 2' # Tuesdays 06:00 UTC, after Dependabot's Monday run
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: auto-patch-deps
+  cancel-in-progress: false
+
+env:
+  ESCALATION_ISSUE_TITLE: Dependencies needing a major bump for security
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      actions: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      - name: Scan and patch
+        run: node scripts/audit-fix-overrides.mjs
+
+      - name: Read result
+        id: result
+        run: |
+          set -euo pipefail
+          test -f audit-result.json || echo '{"changed":false,"applied":[],"escalate":[]}' > audit-result.json
+          echo "changed=$(jq -r '.changed' audit-result.json)" >> "$GITHUB_OUTPUT"
+          echo "n_escalate=$(jq -r '.escalate | length' audit-result.json)" >> "$GITHUB_OUTPUT"
+          {
+            echo 'summary<<EOF'
+            echo '### Applied (semver-safe, same major)'; jq -r 'if (.applied|length)==0 then "- none" else (.applied[] | "- \(.)") end' audit-result.json
+            echo; echo '### Needs a major bump (not applied)'; jq -r 'if (.escalate|length)==0 then "- none" else (.escalate[] | "- \(.)") end' audit-result.json
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Verify the patched build
+        if: steps.result.outputs.changed == 'true'
+        run: npm ci && npm test && npm run build
+
+      - name: Open PR, run checks, enable auto-merge
+        if: steps.result.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SUMMARY: ${{ steps.result.outputs.summary }}
+        run: |
+          set -euo pipefail
+          BRANCH="auto-patch/deps-$(date -u +%Y%m%d)"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add package.json package-lock.json
+          git commit -m "fix(deps): auto-patch vulnerable transitive dependencies"
+          git push -u origin "$BRANCH" --force
+          printf 'Automated fix for security advisories on dependencies Dependabot cannot bump. Each vulnerable package is overridden to the newest version within its current major, and the lockfile is regenerated. Tests and build passed in the workflow before this PR was opened.\n\n%s\n' "$SUMMARY" > body.md
+          gh pr create --base main --head "$BRANCH" --title "fix(deps): auto-patch vulnerable transitive dependencies" --body-file body.md --label dependencies --label security || true
+          gh workflow run ci.yml --ref "$BRANCH"
+          gh workflow run security-scan.yml --ref "$BRANCH"
+          gh pr merge --auto --squash "$BRANCH" || echo "Auto-merge could not be enabled; PR left open for review."
+
+      - name: Track advisories that need a major bump
+        if: steps.result.outputs.n_escalate != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          BODY=$(jq -r '"These dependencies have security advisories with no fix inside their current major version. They need a manual major upgrade:\n\n" + (.escalate | map("- " + .) | join("\n")) + "\n\n_Maintained by the Auto-patch dependencies workflow._"' audit-result.json)
+          EXISTING=$(gh issue list --state open --search "\"$ESCALATION_ISSUE_TITLE\" in:title" --json number --jq '.[0].number // empty')
+          if [ -n "$EXISTING" ]; then gh issue edit "$EXISTING" --body "$BODY"; else gh issue create --title "$ESCALATION_ISSUE_TITLE" --label security --body "$BODY"; fi

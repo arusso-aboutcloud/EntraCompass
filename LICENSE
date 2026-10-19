@@ -1,0 +1,43 @@
+MIT License
+
+Copyright (c) 2026 Antonio Russo (arusso-aboutcloud) and EntraCompass contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+A Kind Note on Commercial Use
+
+EntraPass is published under the MIT License above, which is intentionally
+permissive and allows broad use, modification, and distribution. We believe
+strongly in open source and want this tool to be as useful as possible to
+the community.
+
+That said, if you are considering using EntraPass — or a derivative of it —
+as part of a commercial product, paid service, or consulting engagement, we
+kindly ask that you reach out to us before doing so. Commercial use is warmly
+welcomed; we simply ask for a brief conversation first to ensure we can
+support you properly and acknowledge the work appropriately.
+
+Please get in touch at:
+  Website: https://aboutcloud.io
+  GitHub:  https://github.com/arusso-aboutcloud
+
+Thank you for respecting the spirit of this project, and for helping make
+phishing-resistant authentication more accessible to everyone.
