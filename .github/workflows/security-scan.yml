@@ -30,7 +30,7 @@ jobs:
         run: npm ci
 
       - name: Trivy (vulns, secrets, misconfig) to SARIF
-        uses: aquasecurity/trivy-action@v0.36.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: fs
           scan-ref: .
@@ -41,7 +41,7 @@ jobs:
           exit-code: 0
 
       - name: Upload to GitHub code scanning
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4
         if: always()
         continue-on-error: true
         with:
@@ -50,7 +50,7 @@ jobs:
 
       # Fail on fixable CRITICAL dependency vulnerabilities so they cannot be merged.
       - name: Trivy (fail on fixable CRITICAL)
-        uses: aquasecurity/trivy-action@v0.36.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: fs
           scan-ref: .
