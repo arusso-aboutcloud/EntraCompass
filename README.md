@@ -4,6 +4,8 @@
 
 Live: **https://entracompass.aboutcloud.io** (try it with the built-in sample tenant, no sign-in needed).
 
+![EntraCompass architecture](docs/diagrams/architecture.svg)
+
 ## What it answers
 
 EntraCompass turns your Conditional Access configuration into plain answers for management:
@@ -40,10 +42,20 @@ An application that signs in through Entra (SAML, OpenID Connect, App Proxy) is 
 ## Privacy and security
 
 - **Browser-only.** All analysis runs in your browser. There is no backend that stores tenant data.
+- **Direct to Microsoft.** Graph calls go from your browser straight to `graph.microsoft.com`; they do not pass through Cloudflare.
 - **Read-only.** Delegated Microsoft Graph permissions, read scopes only. It never changes your tenant.
 - **Your own app registration.** PKCE single-page app flow, no client secret.
 - **Session storage only.** Configuration, scan results and crown-jewel tags live in `sessionStorage` and are cleared when the tab closes. No `localStorage`, no cookies.
 - **AI is optional** and receives only scores, counts and finding titles with names removed.
+- **Hardened hosting.** TLS 1.2+ (1.3 preferred), HSTS preload, strict Content Security Policy, WAF and rate limiting at the Cloudflare edge.
+
+![Data lifecycle and trust boundaries](docs/diagrams/data-flow.svg)
+
+## Documentation
+
+- [Architecture](docs/architecture.md): components, scan pipeline, every Graph call, scoring, what-if engine, CI/CD.
+- [Data security architecture](docs/data-architecture.md): data inventory, flows, trust boundaries, threats and mitigations, retention.
+- [Security policy](SECURITY.md): reporting vulnerabilities, security model, edge security, customer controls.
 
 ## Set up
 
