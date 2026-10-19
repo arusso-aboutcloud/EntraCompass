@@ -1,5 +1,7 @@
 # EntraCompass
 
+[![CI](https://github.com/arusso-aboutcloud/EntraCompass/actions/workflows/ci.yml/badge.svg)](https://github.com/arusso-aboutcloud/EntraCompass/actions/workflows/ci.yml) [![Security Scan](https://github.com/arusso-aboutcloud/EntraCompass/actions/workflows/security-scan.yml/badge.svg)](https://github.com/arusso-aboutcloud/EntraCompass/actions/workflows/security-scan.yml) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 **Conditional Access posture for the business.** A free, browser-only, read-only assessment of Microsoft Entra Conditional Access from a business, data protection (DLP) and security standpoint.
 
 Live: **https://entracompass.aboutcloud.io** (try it with the built-in sample tenant, no sign-in needed).
