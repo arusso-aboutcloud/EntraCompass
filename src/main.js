@@ -287,7 +287,7 @@ const ICON = {
 const NAV = [
   [null, [['overview', 'Overview']]],
   ['Access', [['apps', 'Applications'], ['exceptions', 'Exceptions'], ['policies', 'Policies'], ['locations', 'Named locations']]],
-  ['Identities', [['workload', 'Workload identities'], ['agents', 'AI agents']]],
+  ['Identities', [['workload', 'Workload identities'], ['agents', 'AI agents', true]]],
   ['Data', [['dlp', 'Data protection'], ['purview', 'Purview']]],
   ['Act', [['whatif', 'What-if'], ['report', 'Executive report'], ['ai', 'Ask AI']]],
 ];
@@ -316,7 +316,7 @@ function render() {
   if (!TAB_IDS.includes(state.tab)) state.tab = 'overview';
   $('tabs').innerHTML = NAV.map(([group, items]) => `
     <div class="nav-group">${group ? `<div class="nav-label">${group}</div>` : ''}
-      ${items.map(([id, label]) => `<button class="nav-item ${state.tab === id ? 'active' : ''}" ${state.tab === id ? 'aria-current="page"' : ''} data-tab="${id}">${ICON[id]}<span>${label}</span>${tabBadge(id)}</button>`).join('')}
+      ${items.map(([id, label, preview]) => `<button class="nav-item ${state.tab === id ? 'active' : ''}" ${state.tab === id ? 'aria-current="page"' : ''} data-tab="${id}">${ICON[id]}<span>${label}${preview ? ' <span class="preview-dot" title="Preview">Preview</span>' : ''}</span>${tabBadge(id)}</button>`).join('')}
     </div>`).join('');
   const views = { overview: viewOverview, apps: viewApps, exceptions: viewExceptions, policies: viewPolicies, locations: viewLocations, workload: viewWorkload, agents: viewAgents, dlp: viewDlp, purview: viewPurview, whatif: viewWhatIf, report: viewReport, ai: viewAi };
   $('view').innerHTML = views[state.tab]();
@@ -396,6 +396,8 @@ function ring(score, tone) {
 // Views
 // ---------------------------------------------------------------------------
 
+const PREVIEW_TAG = '<span class="preview-tag" title="Microsoft Entra Agent ID, Conditional Access for agents and agent risk are in preview and use Microsoft Graph beta APIs, which can change.">Preview</span>';
+
 const AREA_TAB = { access: 'policies', exceptions: 'exceptions', dlp: 'dlp', workload: 'workload', agents: 'agents', locations: 'locations', crown: 'apps' };
 
 function viewOverview() {
@@ -421,11 +423,11 @@ function viewOverview() {
       [`${r.workload.totals.withSecrets}`, 'apps with client secrets'],
       [`${r.workload.totals.highPrivilege}`, 'can change tenant security'],
     ] },
-    { tab: 'agents', icon: 'agents', title: 'AI agents', score: sc.areas.agents.score, isNew: true, lines: r.agents.inUse ? [
+    { tab: 'agents', icon: 'agents', title: 'AI agents', score: sc.areas.agents.score, preview: true, lines: r.agents.inUse ? [
       [`${at.governed}/${at.identities}`, 'covered by an enforced policy'],
       [`${at.atRisk + at.critical}`, 'risky or over-privileged'],
     ] : [['0', 'agents found'], ['', 'Set up agent policies before the first agent']] },
-    { tab: 'purview', icon: 'purview', title: 'Data and Purview', score: sc.areas.dlp.score, isNew: true, lines: [
+    { tab: 'purview', icon: 'purview', title: 'Data and Purview', score: sc.areas.dlp.score, lines: [
       [`${dlpIn}/${r.dlp.controls.length}`, 'identity-side DLP controls'],
       r.purview.imported ? [`${pvc.filter((c) => c.status === 'present').length}/${pvc.length}`, 'Purview checks passed'] : [`${r.purview.labels.length}`, 'labels found. Load a DLP export'],
     ] },
@@ -477,7 +479,7 @@ function viewOverview() {
 
   <div class="domains">${domains.map((d) => `
     <button class="domain tone-edge-${tone(d.score)}" data-goto="${d.tab}">
-      <div class="domain-head">${ICON[d.icon]}<b>${esc(d.title)}</b>${d.isNew ? '<span class="new-tag">New</span>' : ''}<span class="domain-score tone-${tone(d.score)}">${d.score === null ? '&ndash;' : d.score}</span></div>
+      <div class="domain-head">${ICON[d.icon]}<b>${esc(d.title)}</b>${d.preview ? PREVIEW_TAG : ''}<span class="domain-score tone-${tone(d.score)}">${d.score === null ? '&ndash;' : d.score}</span></div>
       ${d.lines.map(([v, l]) => `<div class="domain-line"><span class="domain-v">${esc(v)}</span> <span class="muted">${esc(l)}</span></div>`).join('')}
       <span class="domain-go">Open ${ICON.arrow}</span>
     </button>`).join('')}</div>
@@ -702,8 +704,8 @@ function viewAgents() {
   const f = state.agentFilter;
   const list = ag.agents.filter((a) => f === 'all' || (f === 'risk' && ['critical', 'high'].includes(a.severity)) || (f === 'ungoverned' && !a.governed) || (f === 'nosponsor' && a.sponsors === 0) || (f === 'thirdparty' && a.publisher === 'Third party'));
   return `
-  <div class="page-head"><div><h1 class="page-title">AI agents <span class="new-tag">New</span></h1>
-    <p class="muted page-sub">Microsoft Entra Agent ID gives AI agents their own identities. Conditional Access treats them differently from people: you secure each <b>access pattern</b> separately.</p></div>
+  <div class="page-head"><div><h1 class="page-title">AI agents ${PREVIEW_TAG}</h1>
+    <p class="muted page-sub">Microsoft Entra Agent ID gives AI agents their own identities. Conditional Access treats them differently from people: you secure each <b>access pattern</b> separately. These features are in preview at Microsoft and read through Graph beta APIs, so results can change as Microsoft updates them.</p></div>
     <button class="btn btn-ghost btn-sm" data-action="export-agents">Export CSV</button></div>
 
   <div class="patterns">
@@ -786,7 +788,7 @@ function viewPurview() {
   const pv = state.results.purview;
   const covRows = Object.entries(LOCATIONS);
   return `
-  <div class="page-head"><div><h1 class="page-title">Purview <span class="new-tag">New</span></h1>
+  <div class="page-head"><div><h1 class="page-title">Purview</h1>
     <p class="muted page-sub">Sensitivity labels and DLP decide what may happen to data. Conditional Access decides who reaches it and from which device. This view checks that the two fit together, including Microsoft 365 Copilot and agents.</p></div></div>
 
   <div class="card import-card ${pv.imported ? 'loaded' : ''}" data-drop="purview">
@@ -891,7 +893,7 @@ function viewWhatIf() {
   <p class="muted small">Simplified engine: device filters, authentication flows and insider risk are listed as "not evaluated". For a specific person, confirm with Microsoft's <a href="${DOCS.whatIf}" target="_blank" rel="noopener">What If tool</a>.</p></div>
   <div class="whatif">
     <form class="card whatif-form" id="whatif-form">
-      <label>Who signs in<select name="userType" data-rerender="1">${opt('member', 'Member (employee)', w.userType)}${opt('guest', 'Guest / external', w.userType)}${opt('agent', 'AI agent acting on its own', w.userType)}${opt('agentUser', 'Agent user account', w.userType)}</select></label>
+      <label>Who signs in<select name="userType" data-rerender="1">${opt('member', 'Member (employee)', w.userType)}${opt('guest', 'Guest / external', w.userType)}${opt('agent', 'AI agent acting on its own (preview)', w.userType)}${opt('agentUser', 'Agent user account (preview)', w.userType)}</select></label>
       ${w.userType === 'agent' ? `
       <label>Agent identity<select name="agentId">${r.agents.agents.length ? r.agents.agents.map((a) => opt(a.id, `${a.name}${a.blueprintName ? ' (' + a.blueprintName + ')' : ''}`, w.agentId)).join('') : opt('', 'Any agent (none found in the tenant)', '')}</select></label>
       <label>Resource<select name="appId">${Object.entries(byCat).map(([cat, list]) => `<optgroup label="${esc(cat)}">${list.map((a) => opt(a.appId, a.name, w.appId)).join('')}</optgroup>`).join('')}</select></label>
@@ -985,7 +987,7 @@ function viewReport() {
   return `
   ${pageHead('Executive report')}
   <div class="intro report-intro">
-    <p>A plain-language report for management: answers, scores, priority actions, a 30/60/90-day roadmap, exceptions, crown jewels, data protection and workload identities.</p>
+    <p>A plain-language report for management: answers, scores, priority actions, a 30/60/90-day roadmap, exceptions, crown jewels, data protection and Purview, workload identities and AI agents (preview).</p>
     <div class="btn-row">
       <button class="btn btn-primary" data-action="print-report">Print or save as PDF</button>
       <button class="btn btn-ghost" data-action="download-report">Download HTML</button>

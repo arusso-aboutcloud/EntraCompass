@@ -55,7 +55,8 @@ test('without an export: labels from Graph, DLP checks unknown and unscored', ()
 test('executive report renders agents and Purview sections, with and without an export', async () => {
   const { buildReportHtml } = await import('../src/report.js');
   const withPv = buildReportHtml(analyze(fixture, { now: NOW, purview: pv }));
-  assert.match(withPv, /<h2>AI agents<\/h2>/);
+  assert.match(withPv, /<h2>AI agents <span class="pv">Preview<\/span><\/h2>/);
+  assert.match(withPv, /preview at Microsoft/);
   assert.match(withPv, /DLP coverage by location/);
   assert.match(withPv, /Invoice Triage Agent/);
   const without = buildReportHtml(analyze(fixture, { now: NOW }));

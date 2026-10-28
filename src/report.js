@@ -56,7 +56,7 @@ export function buildReportHtml(r, { demo = false } = {}) {
   <tr><td>Business applications assessed</td><td>${s.apps.business} (${s.apps.unprotected} with no MFA policy, ${s.apps.excluded} excluded from a policy)</td></tr>
   <tr><td>Exceptions</td><td>${s.exclusionTotal} (${s.exclusions.gap || 0} gaps, ${s.exclusions.review || 0} to review, ${(s.exclusions.cleanup || 0) + (s.exclusions.stale || 0)} to clean up)</td></tr>
   <tr><td>App registrations with credentials</td><td>${r.workload.apps.length} (${r.workload.totals.withSecrets} with client secrets, ${r.workload.totals.highPrivilege} able to change tenant security)</td></tr>
-  <tr><td>AI agents (Entra Agent ID)</td><td>${r.agents.inUse ? `${r.agents.totals.identities} agent identities, ${r.agents.totals.governed} covered by an enforced policy, ${r.agents.totals.atRisk} risky` : 'None found'}</td></tr>
+  <tr><td>AI agents (Entra Agent ID, preview)</td><td>${r.agents.inUse ? `${r.agents.totals.identities} agent identities, ${r.agents.totals.governed} covered by an enforced policy, ${r.agents.totals.atRisk} risky` : 'None found'}</td></tr>
   <tr><td>Purview DLP</td><td>${r.purview.imported ? `${r.purview.totals.dlpPolicies} policies (${r.purview.totals.enforced} enforced), ${r.purview.totals.labels} labels` : `Not assessed (no export loaded)${r.purview.labels.length ? `; ${r.purview.labels.length} sensitivity labels found` : ''}`}</td></tr>
 </table></section>
 
@@ -106,7 +106,8 @@ ${r.dlp.controls.map((c) => `<tr><td><b>${esc(c.title)}</b><div class="note">${e
 <p class="note">${esc(r.dlp.note)}</p>
 </section>
 
-<section class="pb"><h2>AI agents</h2>
+<section class="pb"><h2>AI agents <span class="pv">Preview</span></h2>
+<p class="note">Microsoft Entra Agent ID, Conditional Access for agents and agent risk are in preview at Microsoft and were read through Microsoft Graph beta APIs. Treat these results as indicative: the APIs and policy options can change.</p>
 ${r.agents.inUse ? `<table class="kv">
 <tr><td>Agent identities</td><td>${r.agents.totals.identities} (${r.agents.totals.blueprints} blueprints, ${r.agents.totals.thirdParty} third-party)</td></tr>
 <tr><td>Covered by an enforced Conditional Access policy</td><td>${r.agents.totals.governed} of ${r.agents.totals.identities}</td></tr>
@@ -184,6 +185,7 @@ table{width:100%;border-collapse:collapse}td,th{text-align:left;vertical-align:t
 .sev.critical{background:#fee2e2;color:#991b1b}.sev.high{background:#ffedd5;color:#9a3412}.sev.medium{background:#fef3c7;color:#92400e}.sev.low{background:#e0f2fe;color:#075985}
 .st.present{background:#d1fae5;color:#065f46}.st.partial{background:#fef3c7;color:#92400e}.st.missing{background:#fee2e2;color:#991b1b}
 .st.info,.st.unknown{background:#f1f5f9;color:#475569}
+.pv{display:inline-block;vertical-align:middle;font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#92400e;background:#fef3c7;border:1px solid #f59e0b;border-radius:999px;padding:1px 8px;margin-left:6px}
 .road{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.road-col{background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px}.road-col ul{margin:0;padding-left:18px}
 .warn-box{background:#fffbeb;border:1px solid #f59e0b;padding:8px 12px;border-radius:6px}
 tr,.road-col{break-inside:avoid}
