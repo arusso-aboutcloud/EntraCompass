@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 560" width="1000" height="560" font-family="Segoe UI, Helvetica, Arial, sans-serif" role="img" aria-labelledby="t d">
+  <title id="t">Conditional Access for AI agents: access patterns</title>
+  <desc id="d">Three ways an AI agent gets a token. On behalf of a user, the user's policies apply. Acting on its own with an agent identity, only agent policies apply and the only control is block. With an agent user account, only agent-user policies apply; policies for All users do not include it. EntraCompass checks each pattern.</desc>
+  <rect width="1000" height="560" rx="14" fill="#ffffff"/>
+  <text x="30" y="40" font-size="20" font-weight="700" fill="#0f172a">AI agents: which Conditional Access applies</text>
+  <rect x="472" y="23" width="70" height="22" rx="11" fill="#fef3c7" stroke="#f59e0b"/>
+  <text x="507" y="38" font-size="11" font-weight="700" fill="#92400e" text-anchor="middle">PREVIEW</text>
+  <text x="30" y="62" font-size="12.5" fill="#475569">Policies attach to the token's subject. Each access pattern is secured separately (Microsoft Entra Agent ID).</text>
+
+  <!-- column headers -->
+  <g font-size="12" fill="#64748b" font-weight="600">
+    <text x="30" y="104">Token subject</text>
+    <text x="30" y="178">Policies that apply</text>
+    <text x="30" y="264">Controls available</text>
+    <text x="30" y="350">Common gap</text>
+    <text x="30" y="436">EntraCompass checks</text>
+  </g>
+
+  <g font-size="12" fill="#0f172a">
+    <!-- Pattern 1 -->
+    <rect x="170" y="80" width="260" height="420" rx="12" fill="#eff6ff" stroke="#1d4ed8" stroke-width="1.3"/>
+    <text x="186" y="104" font-size="14" font-weight="700" fill="#1e3a8a">On behalf of a user</text>
+    <text x="186" y="124" fill="#475569">The signed-in user (delegated)</text>
+    <text x="186" y="178" font-weight="600">User policies</text>
+    <text x="186" y="196" fill="#475569">the same as the person using it</text>
+    <text x="186" y="264" font-weight="600">MFA, device, location,</text>
+    <text x="186" y="282" fill="#475569">session controls</text>
+    <text x="186" y="350" fill="#475569">Tenant-wide consent lets the</text>
+    <text x="186" y="368" fill="#475569">agent read every user's data</text>
+    <text x="186" y="436" fill="#0f172a">Delegated grants for all users,</text>
+    <text x="186" y="454" fill="#0f172a">broad scopes (mail, files)</text>
+
+    <!-- Pattern 2 -->
+    <rect x="450" y="80" width="260" height="420" rx="12" fill="#f5f3ff" stroke="#6d28d9" stroke-width="1.3"/>
+    <text x="466" y="104" font-size="14" font-weight="700" fill="#4c1d95">Autonomous agent</text>
+    <text x="466" y="124" fill="#475569">The agent identity (app-only)</text>
+    <text x="466" y="178" font-weight="600">Agent policies only</text>
+    <text x="466" y="196" fill="#475569">all agents, by blueprint or</text>
+    <text x="466" y="214" fill="#475569">custom security attribute</text>
+    <text x="466" y="264" font-weight="600">Block only</text>
+    <text x="466" y="282" fill="#475569">condition: agent risk</text>
+    <text x="466" y="350" fill="#475569">No agent policy at all: user</text>
+    <text x="466" y="368" fill="#475569">policies never apply here</text>
+    <text x="466" y="436" fill="#0f172a">All agents covered, high risk</text>
+    <text x="466" y="454" fill="#0f172a">blocked, approved-only list,</text>
+    <text x="466" y="472" fill="#0f172a">sponsors, app permissions, roles</text>
+
+    <!-- Pattern 3 -->
+    <rect x="730" y="80" width="240" height="420" rx="12" fill="#ecfdf5" stroke="#047857" stroke-width="1.3"/>
+    <text x="746" y="104" font-size="14" font-weight="700" fill="#065f46">Agent user account</text>
+    <text x="746" y="124" fill="#475569">The agent's own user account</text>
+    <text x="746" y="142" fill="#475569">(mailbox, Teams presence)</text>
+    <text x="746" y="178" font-weight="600">Agent-user policies only</text>
+    <text x="746" y="196" fill="#475569">"All users" does not include it</text>
+    <text x="746" y="264" font-weight="600">Block; compliant device</text>
+    <text x="746" y="282" fill="#475569">or network on endpoints</text>
+    <text x="746" y="350" fill="#475569">Assumed covered by an</text>
+    <text x="746" y="368" fill="#475569">"All users" policy: it is not</text>
+    <text x="746" y="436" fill="#0f172a">Every agent user account</text>
+    <text x="746" y="454" fill="#0f172a">covered by an enforced policy</text>
+  </g>
+
+  <g stroke="#e2e8f0" stroke-width="1">
+    <line x1="170" y1="150" x2="970" y2="150"/><line x1="170" y1="236" x2="970" y2="236"/>
+    <line x1="170" y1="322" x2="970" y2="322"/><line x1="170" y1="408" x2="970" y2="408"/>
+  </g>
+
+  <text x="30" y="530" font-size="12" fill="#64748b">Agents that use API keys bypass Entra token issuance, so Conditional Access cannot apply. Agent ID and Conditional Access for agents are in preview.</text>
+</svg>

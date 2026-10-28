@@ -41,6 +41,18 @@ EntraCompass turns your Conditional Access configuration into plain answers for 
 | **Executive report** | Self-contained HTML report: answers, scores, priority actions, 30/60/90-day roadmap, exceptions, crown jewels, DLP controls, AI agents and Purview. Print to PDF or download. |
 | **Ask AI (optional)** | Cloudflare Workers AI assistant. Only aggregated, non-identifying data is sent. |
 
+### AI agents: secure each access pattern
+
+Conditional Access policies attach to the token's subject. An agent acting for a user meets the user's policies; an agent acting on its own (agent identity) meets only agent policies, where the only control is block; an agent user account meets only agent-user policies, because "All users" does not include it. EntraCompass checks each pattern. Agent ID and Conditional Access for agents are **preview** features with beta Graph APIs, and the app labels them as such.
+
+![AI agents: which Conditional Access applies](docs/diagrams/agents-access-patterns.svg)
+
+### Purview and Conditional Access work in pairs
+
+Purview decides what may happen to data; Conditional Access decides who reaches it, from where and on which device. EntraCompass checks that each pair is complete.
+
+![Purview and Conditional Access pairs](docs/diagrams/purview-ca.svg)
+
 ### On SAML and on-prem apps
 
 An application that signs in through Entra (SAML, OpenID Connect, App Proxy) is subject to Conditional Access, wherever it is hosted. Excluding it from a policy does not fix the underlying break; it removes control. EntraCompass flags these exclusions and recommends a dedicated policy the app can meet (for example a compliant or hybrid-joined device, or trusted network plus MFA).
@@ -63,6 +75,7 @@ An application that signs in through Entra (SAML, OpenID Connect, App Proxy) is 
 - [Architecture](docs/architecture.md): components, scan pipeline, every Graph call, scoring, what-if engine, CI/CD.
 - [Data security architecture](docs/data-architecture.md): data inventory, flows, trust boundaries, threats and mitigations, retention.
 - [Security policy](SECURITY.md): reporting vulnerabilities, security model, edge security, customer controls.
+- [Infrastructure](infra/README.md): the setup and export scripts, Cloudflare Pages hosting, repository settings, and how to self-host.
 
 ## Set up
 
@@ -82,9 +95,9 @@ An application that signs in through Entra (SAML, OpenID Connect, App Proxy) is 
 
      | Permission | Used for |
      |---|---|
-     | `AgentIdentity.Read.All` | Agent identities, blueprints and sponsors (Entra Agent ID). Without it, agents are found among service principals in a reduced mode |
-     | `IdentityRiskyAgent.Read.All` | Agent risk from ID Protection |
-     | `InformationProtectionPolicy.Read` | Sensitivity labels published to the signed-in admin |
+     | `AgentIdentity.Read.All` | Agent identities, blueprints and sponsors (Entra Agent ID). Admin consent. The signed-in account also needs a supported Agent ID role (for example Agent ID Administrator). Without either, agents are found among service principals in a reduced mode |
+     | `IdentityRiskyAgent.Read.All` | Agent risk from ID Protection. Admin consent; readable by Security Reader or Global Reader |
+     | `InformationProtectionPolicy.Read` | Sensitivity labels published to the signed-in admin (no admin consent needed). For all labels and DLP policies, use the Purview export |
 
    Or run [`infra/New-EntraCompassApp.ps1`](infra/New-EntraCompassApp.ps1) `-GrantAdminConsent -IncludeOptional`.
    Optional permissions are not requested at sign-in: once consented, Entra includes them in the Graph token automatically, so adding them later never breaks sign-in.

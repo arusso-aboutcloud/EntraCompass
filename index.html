@@ -63,11 +63,15 @@
               <li>API permissions &gt; Microsoft Graph &gt; Delegated:
                 <code>Policy.Read.All</code>, <code>Application.Read.All</code>, <code>Directory.Read.All</code>,
                 <code>AuditLog.Read.All</code>, <code>User.Read</code>. Then <b>Grant admin consent</b>.</li>
-              <li>Optional, for the agent and Purview views: <code>AgentIdentity.Read.All</code>, <code>IdentityRiskyAgent.Read.All</code>,
-                <code>InformationProtectionPolicy.Read</code>. Without them those checks run with less detail.</li>
+              <li>Optional, for the AI agents and Purview views: <code>AgentIdentity.Read.All</code> and <code>IdentityRiskyAgent.Read.All</code>
+                (admin consent), <code>InformationProtectionPolicy.Read</code>. They can be added later: sign-in does not change.
+                Without them those checks run with less detail.</li>
               <li>Copy the Application (client) ID and Directory (tenant) ID below.</li>
             </ol>
-            <p class="muted small">Or run <code>infra/New-EntraCompassApp.ps1</code> from the GitHub repo to create it for you.</p>
+            <p class="muted small">Agent identities, blueprints and sponsors also need the signing-in account to hold an Agent ID role
+              (for example Agent ID Administrator); otherwise agents are found in a reduced mode. Labels from Graph are those published
+              to the signed-in admin; for DLP policies, load the Purview export in the Purview view.</p>
+            <p class="muted small">Or run <code>infra/New-EntraCompassApp.ps1 -GrantAdminConsent -IncludeOptional</code> from the GitHub repo to create it for you.</p>
           </div>
           <form id="setup-form" autocomplete="off">
             <label>Directory (tenant) ID
