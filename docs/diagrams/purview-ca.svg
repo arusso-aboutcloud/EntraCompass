@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 520" width="1000" height="520" font-family="Segoe UI, Helvetica, Arial, sans-serif" role="img" aria-labelledby="t d">
+  <title id="t">Purview and Conditional Access: the pairs EntraCompass checks</title>
+  <desc id="d">Each Purview control only works when a matching Conditional Access control is in place. Endpoint DLP needs managed devices; DLP for cloud apps needs session control; a label that requires an authentication context needs a policy for that context; the Copilot DLP location complements agent policies and least-privilege permissions; encrypting labels interact with the Rights Management exclusion and guest MFA.</desc>
+  <defs>
+    <marker id="b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#64748b"/></marker>
+  </defs>
+  <rect width="1000" height="520" rx="14" fill="#ffffff"/>
+  <text x="30" y="40" font-size="20" font-weight="700" fill="#0f172a">Purview and Conditional Access: the pairs EntraCompass checks</text>
+  <text x="30" y="62" font-size="12.5" fill="#475569">Purview decides what may happen to data. Conditional Access decides who reaches it, from where and on which device. A gap on either side breaks the pair.</text>
+
+  <g font-size="13" font-weight="700">
+    <text x="30" y="98" fill="#4c1d95">Microsoft Purview</text>
+    <text x="370" y="98" fill="#334155">What EntraCompass flags if one side is missing</text>
+    <text x="730" y="98" fill="#1e3a8a">Conditional Access</text>
+  </g>
+
+  <g font-size="12">
+    <!-- Row helper: purview box 30..300, middle 370..660, CA 730..970 -->
+    <g>
+      <rect x="30" y="112" width="270" height="62" rx="10" fill="#f5f3ff" stroke="#8b5cf6"/>
+      <text x="44" y="138" font-weight="700" fill="#4c1d95">Endpoint DLP</text><text x="44" y="157" fill="#5b21b6">copy, print, USB, upload rules</text>
+      <rect x="730" y="112" width="240" height="62" rx="10" fill="#eff6ff" stroke="#3b82f6"/>
+      <text x="744" y="138" font-weight="700" fill="#1e3a8a">Compliant device required</text><text x="744" y="157" fill="#1d4ed8">for Office 365 desktop and sync</text>
+      <text x="370" y="138" fill="#0f172a">Data syncs to devices Endpoint DLP</text><text x="370" y="157" fill="#475569">never sees</text>
+    </g>
+    <g>
+      <rect x="30" y="186" width="270" height="62" rx="10" fill="#f5f3ff" stroke="#8b5cf6"/>
+      <text x="44" y="212" font-weight="700" fill="#4c1d95">DLP for cloud apps</text><text x="44" y="231" fill="#5b21b6">Defender for Cloud Apps location</text>
+      <rect x="730" y="186" width="240" height="62" rx="10" fill="#eff6ff" stroke="#3b82f6"/>
+      <text x="744" y="212" font-weight="700" fill="#1e3a8a">Session control</text><text x="744" y="231" fill="#1d4ed8">route unmanaged browsers to MDCA</text>
+      <text x="370" y="212" fill="#0f172a">Session policies never run, so personal</text><text x="370" y="231" fill="#475569">devices can download freely</text>
+    </g>
+    <g>
+      <rect x="30" y="260" width="270" height="62" rx="10" fill="#f5f3ff" stroke="#8b5cf6"/>
+      <text x="44" y="286" font-weight="700" fill="#4c1d95">Label requires auth context</text><text x="44" y="305" fill="#5b21b6">for example Highly Confidential sites</text>
+      <rect x="730" y="260" width="240" height="62" rx="10" fill="#eff6ff" stroke="#3b82f6"/>
+      <text x="744" y="286" font-weight="700" fill="#1e3a8a">Policy for that context</text><text x="744" y="305" fill="#1d4ed8">phishing-resistant MFA, device</text>
+      <text x="370" y="286" fill="#0f172a">The label asks for step-up, but nothing</text><text x="370" y="305" fill="#475569">extra is required</text>
+    </g>
+    <g>
+      <rect x="30" y="334" width="270" height="62" rx="10" fill="#f5f3ff" stroke="#8b5cf6"/>
+      <text x="44" y="360" font-weight="700" fill="#4c1d95">Copilot DLP location</text><text x="44" y="379" fill="#5b21b6">keep labelled content out of AI</text>
+      <rect x="730" y="334" width="240" height="62" rx="10" fill="#eff6ff" stroke="#3b82f6"/>
+      <text x="744" y="360" font-weight="700" fill="#1e3a8a">Agent policies, least privilege</text><text x="744" y="379" fill="#1d4ed8">block risky or unapproved agents</text>
+      <text x="370" y="360" fill="#0f172a">Copilot and agents can process sensitive</text><text x="370" y="379" fill="#475569">content they can reach</text>
+    </g>
+    <g>
+      <rect x="30" y="408" width="270" height="62" rx="10" fill="#f5f3ff" stroke="#8b5cf6"/>
+      <text x="44" y="434" font-weight="700" fill="#4c1d95">Encrypting labels</text><text x="44" y="453" fill="#5b21b6">protection travels with the file</text>
+      <rect x="730" y="408" width="240" height="62" rx="10" fill="#eff6ff" stroke="#3b82f6"/>
+      <text x="744" y="434" font-weight="700" fill="#1e3a8a">RMS exclusion, guest MFA</text><text x="744" y="453" fill="#1d4ed8">who can open protected files</text>
+      <text x="370" y="434" fill="#0f172a">Excluding Rights Management is a DLP</text><text x="370" y="453" fill="#475569">decision that needs an owner</text>
+    </g>
+  </g>
+
+  <g stroke="#94a3b8" stroke-width="1.6" fill="none">
+    <line x1="302" y1="143" x2="362" y2="143" marker-end="url(#b)"/><line x1="728" y1="143" x2="668" y2="143" marker-end="url(#b)"/>
+    <line x1="302" y1="217" x2="362" y2="217" marker-end="url(#b)"/><line x1="728" y1="217" x2="668" y2="217" marker-end="url(#b)"/>
+    <line x1="302" y1="291" x2="362" y2="291" marker-end="url(#b)"/><line x1="728" y1="291" x2="668" y2="291" marker-end="url(#b)"/>
+    <line x1="302" y1="365" x2="362" y2="365" marker-end="url(#b)"/><line x1="728" y1="365" x2="668" y2="365" marker-end="url(#b)"/>
+    <line x1="302" y1="439" x2="362" y2="439" marker-end="url(#b)"/><line x1="728" y1="439" x2="668" y2="439" marker-end="url(#b)"/>
+  </g>
+
+  <text x="30" y="500" font-size="12" fill="#64748b">Labels come from Graph; DLP policies and label settings come from the optional Purview export, parsed in the browser.</text>
+</svg>

@@ -6,7 +6,7 @@ EntraCompass is designed so that your tenant data never reaches a server we oper
 
 Please report privately through GitHub: **Security tab > Report a vulnerability** on this repository. Do not open a public issue.
 
-In scope: the web app, the `/ai/ask` Pages Function, the app-registration script, and the CI workflows in this repository.
+In scope: the web app, the `/ai/ask` Pages Function, the scripts in `infra/` (app registration and Purview export), and the CI workflows in this repository.
 Out of scope: Microsoft Entra ID and Microsoft Graph themselves; volumetric denial of service; findings that require a compromised browser or device.
 
 ## Supported versions
@@ -18,8 +18,9 @@ Only the current `main` branch (deployed at https://entracompass.aboutcloud.io) 
 | Area | Control |
 |---|---|
 | Authentication | Your own single-tenant app registration, authorization code flow with PKCE, no client secret |
-| Authorization | Delegated, read-only Microsoft Graph scopes: `Policy.Read.All`, `Application.Read.All`, `Directory.Read.All`, `AuditLog.Read.All`, `User.Read`. The signed-in admin's role also limits what is returned |
+| Authorization | Delegated, read-only Microsoft Graph scopes: `Policy.Read.All`, `Application.Read.All`, `Directory.Read.All`, `AuditLog.Read.All`, `User.Read`. Optional, read-only: `AgentIdentity.Read.All`, `IdentityRiskyAgent.Read.All`, `InformationProtectionPolicy.Read` (never requested at sign-in; used only if you consent). The signed-in admin's role also limits what is returned |
 | Data handling | Processed in the browser; stored only in `sessionStorage`; no backend, no database, no cookies |
+| Purview export (optional) | Created by you with a read-only PowerShell script that redacts email addresses; opened with the browser's File API, size-capped (5 MB), parsed as JSON, every value escaped before display; never uploaded |
 | Network | Graph calls go straight from the browser to Microsoft. The page may only connect to itself, `login.microsoftonline.com` and `graph.microsoft.com` (CSP) |
 | AI (optional) | Aggregated, name-free summary only; origin-locked; rate-limited; nothing stored |
 | Supply chain | `npm ci` from lockfile, Dependabot with auto-merge for patch/minor, weekly auto-patch of transitive dependencies, Trivy scan, Actions pinned by SHA, protected `main` |
@@ -44,5 +45,5 @@ The hosted site runs on Cloudflare Pages behind the aboutcloud.io zone protectio
 - Delete or disable the app registration when you are not assessing.
 - Turn on "Assignment required" for the EntraCompass enterprise app and assign only assessors.
 - Protect the app with your own Conditional Access (phishing-resistant MFA, compliant device).
-- Treat downloaded reports and JSON as confidential: they describe your security controls.
+- Treat downloaded reports and JSON as confidential: they describe your security controls. The same applies to the Purview export file: review it before use and delete it after the assessment.
 - Prefer to self-host? Fork, build and deploy `dist/` on your own infrastructure.

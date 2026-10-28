@@ -1,8 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 470" width="1000" height="470" font-family="Segoe UI, Helvetica, Arial, sans-serif" role="img" aria-labelledby="t d">
   <title id="t">EntraCompass data lifecycle</title>
-  <desc id="d">Tenant data is read from Microsoft Graph into browser memory, analysed, kept in sessionStorage until the tab closes, and only leaves the browser as downloads the user makes or, optionally, as an aggregated AI summary with names removed.</desc>
+  <desc id="d">Tenant data is read from Microsoft Graph (and, optionally, from a Purview export file the user opens) into browser memory, analysed, kept in sessionStorage until the tab closes, and only leaves the browser as downloads the user makes or, optionally, as an aggregated AI summary with names removed.</desc>
   <defs>
     <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#334155"/></marker>
+    <marker id="p" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#6d28d9"/></marker>
     <marker id="o" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#c2410c"/></marker>
   </defs>
   <rect width="1000" height="470" rx="14" fill="#ffffff"/>
@@ -17,7 +18,7 @@
     <text x="44" y="146" font-weight="700">Microsoft Graph</text><text x="44" y="166" fill="#475569">read-only</text><text x="44" y="184" fill="#475569">delegated token</text>
 
     <rect x="210" y="110" width="160" height="104" rx="10" fill="#ffffff" stroke="#16a34a"/>
-    <text x="224" y="134" font-weight="700">1 Collect</text><text x="224" y="154" fill="#475569">raw tenant data</text><text x="224" y="172" fill="#475569">in memory</text><text x="224" y="190" fill="#475569">policies, apps, names</text>
+    <text x="224" y="134" font-weight="700">1 Collect</text><text x="224" y="154" fill="#475569">raw tenant data</text><text x="224" y="172" fill="#475569">in memory: policies,</text><text x="224" y="190" fill="#475569">apps, agents, labels</text>
 
     <rect x="400" y="110" width="160" height="104" rx="10" fill="#ffffff" stroke="#16a34a"/>
     <text x="414" y="134" font-weight="700">2 Analyse</text><text x="414" y="154" fill="#475569">findings, scores,</text><text x="414" y="172" fill="#475569">exceptions, answers</text><text x="414" y="190" fill="#475569">pure functions</text>
@@ -25,10 +26,13 @@
     <rect x="590" y="110" width="140" height="104" rx="10" fill="#ffffff" stroke="#16a34a"/>
     <text x="604" y="134" font-weight="700">3 Use</text><text x="604" y="154" fill="#475569">dashboard,</text><text x="604" y="172" fill="#475569">what-if, report</text><text x="604" y="190" fill="#475569">preview</text>
 
+    <rect x="30" y="250" width="140" height="110" rx="10" fill="#f5f3ff" stroke="#6d28d9" stroke-dasharray="5 4"/>
+    <text x="44" y="274" font-weight="700" fill="#4c1d95">Purview export</text><text x="44" y="294" fill="#5b21b6">optional JSON file</text><text x="44" y="312" fill="#5b21b6">on your device,</text><text x="44" y="330" fill="#5b21b6">opened by you,</text><text x="44" y="348" fill="#5b21b6">never uploaded</text>
+
     <rect x="210" y="250" width="350" height="110" rx="10" fill="#ecfdf5" stroke="#6ee7b7"/>
     <text x="224" y="274" font-weight="700" fill="#065f46">sessionStorage (this tab only)</text>
     <text x="224" y="294" fill="#065f46">app config (tenant and client IDs), raw scan,</text>
-    <text x="224" y="312" fill="#065f46">crown-jewel tags, MSAL token cache</text>
+    <text x="224" y="312" fill="#065f46">crown-jewel tags, Purview export, theme, MSAL tokens</text>
     <text x="224" y="336" fill="#065f46">Deleted on sign-out or when the tab closes</text>
 
     <rect x="590" y="250" width="140" height="110" rx="10" fill="#ffffff" stroke="#16a34a"/>
@@ -49,10 +53,11 @@
     <line x1="290" y1="214" x2="290" y2="248" marker-end="url(#a)"/>
     <line x1="660" y1="214" x2="660" y2="248" stroke="#94a3b8" stroke-dasharray="3 3"/>
   </g>
+  <path d="M170,280 H188 V200 H208" fill="none" stroke="#6d28d9" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#p)"/>
   <path d="M730,196 H762 V300 H788" fill="none" stroke="#c2410c" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#o)"/>
 
   <g font-size="12" fill="#334155">
-    <text x="30" y="414">No backend database. No localStorage or cookies. The Graph token never leaves the browser.</text>
+    <text x="30" y="414">No backend database. No localStorage or cookies. The Graph token and the Purview file never leave the browser.</text>
     <text x="30" y="436">Cloudflare sees only standard request metadata for page loads and, if used, the AI question and summary.</text>
   </g>
 </svg>

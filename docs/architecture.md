@@ -14,6 +14,7 @@ EntraCompass is a static single-page application. Everything that touches tenant
 | Microsoft Graph | Microsoft | Read-only source of configuration data |
 | Cloudflare Pages | Cloudflare edge | Serves the built static files (`dist/`) with security headers |
 | Pages Function `functions/ai/ask.js` | Cloudflare edge | Optional, stateless AI endpoint backed by Workers AI |
+| Purview export file (optional) | Your device, then the browser | DLP and label configuration from `infra/Export-PurviewForEntraCompass.ps1`, opened in the page and parsed by `src/purview.js` |
 
 ## Source layout
 
@@ -84,7 +85,7 @@ Each area (access coverage, exceptions, data protection and Purview, workload id
 
 ## Hosting and delivery
 
-- **Cloudflare Pages** with GitHub integration: every push to `main` builds (`npm run build`) and deploys `dist/`. Pull requests get preview deployments.
+- **Cloudflare Pages** with GitHub integration: every push to `main` builds (`npm run build`) and deploys `dist/`; branches and pull requests get preview deployments and a "Cloudflare Pages" check. Setup details: [infra/README.md](../infra/README.md).
 - **Edge security**: see [SECURITY.md](../SECURITY.md#edge-security).
 - **Optional AI**: the Pages Function has a Workers AI binding (`AI`), an origin allow-list (`ALLOWED_ORIGIN`) and an in-memory per-IP limit, behind the zone rate-limit rule.
 
@@ -92,11 +93,20 @@ Each area (access coverage, exceptions, data protection and Purview, workload id
 
 | Workflow | Purpose |
 |---|---|
-| `ci.yml` (required check `build`) | Unit tests for analyzer and what-if, production build, output check |
+| `ci.yml` (required check `build`) | Unit tests (analyzer, agents, Purview parser and checks, what-if, report), production build, output check |
 | `security-scan.yml` (required check `trivy-scan`) | Trivy filesystem scan to code scanning; fails on fixable critical dependency vulnerabilities |
 | `dependabot.yml` + `dependabot-auto-merge.yml` | Weekly npm and monthly Actions updates; patch and minor auto-merge once checks pass |
 | `auto-patch-deps.yml` | Weekly: overrides vulnerable transitive dependencies within their major version, opens a PR, runs CI, enables auto-merge; tracks anything needing a major upgrade in one issue |
 
-`main` is protected: pull requests only, both required checks must pass and be up to date.
+`main` is protected: pull requests only, both required checks must pass and be up to date. The auto-patch workflow needs the repository setting "Allow GitHub Actions to create and approve pull requests".
+
+## Diagrams
+
+| Diagram | Shows |
+|---|---|
+| [architecture.svg](diagrams/architecture.svg) | Components and the five data paths (sign-in, Graph, app files, optional AI, optional Purview file) |
+| [data-flow.svg](diagrams/data-flow.svg) | Data lifecycle inside the browser trust boundary |
+| [agents-access-patterns.svg](diagrams/agents-access-patterns.svg) | Which Conditional Access applies to each AI agent access pattern (preview) |
+| [purview-ca.svg](diagrams/purview-ca.svg) | The Purview and Conditional Access pairs EntraCompass checks |
 
 See also: [Data security architecture](data-architecture.md).

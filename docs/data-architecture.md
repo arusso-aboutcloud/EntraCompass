@@ -10,7 +10,7 @@ These are design commitments. Changes that break them will not be merged.
 
 1. **No backend storage.** There is no database, no server-side session and no logging of scan results.
 2. **Browser storage is `sessionStorage` only.** No `localStorage`, no IndexedDB, no cookies. Everything is cleared when the tab closes or on sign-out.
-3. **Read-only.** Only delegated `*.Read.All` permissions; the app never writes to the tenant.
+3. **Read-only.** Only delegated read permissions (`*.Read.All`, plus the optional `InformationProtectionPolicy.Read`); the app never writes to the tenant. The Purview export script only runs `Get-*` cmdlets.
 4. **No secrets.** Public client with PKCE. There is no client secret or certificate to leak.
 5. **Minimised AI.** The optional assistant receives aggregated numbers and finding titles with names removed; never identifiers.
 
@@ -61,7 +61,9 @@ Built in `aiSummary()` in `src/main.js`: overall and per-area scores, policy cou
 | Token theft from storage | `sessionStorage` is per tab and per origin and is cleared on close; no long-lived storage |
 | Over-privileged access | Read-only delegated scopes; the signed-in admin's own role further limits what Graph returns |
 | Abuse of the AI endpoint (cost, prompt injection) | Origin allow-list, per-IP limit in the function, zone rate limit, WAF method rule (POST/OPTIONS only on `/ai/ask`), prompt-injection and harmful-request filters, 2,000-character question cap, 64 KB body cap |
-| Misleading output | Every source failure is shown in the UI and report; simplifications of the what-if engine are stated |
+| Malicious or malformed Purview file | 5 MB cap; parsed with `JSON.parse` only (no code evaluation); unknown shapes rejected with a readable error; every value escaped before rendering; strings truncated |
+| Sensitive data in the Purview file | The export script writes configuration only (names, modes, locations, actions) and replaces email addresses with `[redacted]`; the file is never uploaded |
+| Misleading output | Every source failure is shown in the UI and report; optional sources explain how to enable them; simplifications of the what-if engine are stated; AI agent results are labelled Preview because they rely on beta APIs |
 | Shared or unattended computer | Sign-out clears all EntraCompass and MSAL keys; closing the tab clears `sessionStorage` |
 
 ## Customer controls
