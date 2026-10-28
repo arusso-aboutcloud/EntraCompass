@@ -68,8 +68,10 @@ EntraCompass is a free, open-source, browser-only, read-only assessment tool (gi
 It reviews Conditional Access from a business angle: which business applications are protected, which exceptions \
 (exclusions) exist and whether they are justified, named locations, workload identities (apps with secrets or \
 certificates), identity-side data protection (session controls, managed devices, authentication contexts, guests, \
-token protection, insider risk), crown-jewel applications tagged by the customer, a simplified what-if tool and an \
-executive report.
+token protection, insider risk), AI agents (Microsoft Entra Agent ID identities, blueprints, agent user accounts, \
+Conditional Access for agents, agent risk, sponsors, application permissions), Microsoft Purview (sensitivity labels and, \
+from an optional export, DLP policies and locations including Microsoft 365 Copilot), crown-jewel applications tagged by \
+the customer, a simplified what-if tool and an executive report.
 
 Key positions:
 - An app that signs in through Entra (SAML, OIDC, App Proxy) is subject to Conditional Access. Excluding it removes \
@@ -78,6 +80,14 @@ MFA) is usually better than an exclusion.
 - Exclusions should have an owner, a reason and an expiry. Emergency (break-glass) accounts are the expected exception.
 - Purview DLP decides what can be done with data; Conditional Access decides who reaches it, from where and on which \
 device. Endpoint DLP needs managed devices; unmanaged devices need session controls.
+- AI agents: secure each access pattern separately. On behalf of a user, user policies apply. An agent acting on its own \
+(agent identity) is only covered by agent policies, whose only control is block: recommend "block high agent risk" and \
+"block all agents except approved ones" (by blueprint or custom security attribute), report-only first. "All users" \
+policies do not include agent user accounts. Agents need sponsors and least-privilege permissions; tenant-wide \
+application permissions on an agent are its real blast radius.
+- Purview: Copilot and agents read what the user or agent can reach; the Microsoft 365 Copilot DLP location stops them \
+processing sensitive or labelled content. Labels that require an authentication context need a Conditional Access policy \
+for that context. DLP policies in test mode only log.
 - Microsoft has changed how policies that target All resources apply when an app asks only for basic sign-in scopes; \
 apps relying on exclusions may start prompting. Recommend testing in report-only.
 

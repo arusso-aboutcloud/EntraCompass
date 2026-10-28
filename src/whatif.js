@@ -11,11 +11,17 @@
 // reference for a specific user.
 
 import { KNOWN_APPS } from './knowledge.js';
-import { grantSummary, sessionSummary, isWorkloadPolicy, describeGrant, appInScope, STATE_LABEL } from './policy.js';
+import { grantSummary, sessionSummary, isWorkloadPolicy, isAgentPolicy, isAgentUserPolicy, describeGrant, appInScope, STATE_LABEL } from './policy.js';
 
 /**
  * scenario = {
- *   userType: 'member' | 'guest',
+ *   userType: 'member' | 'guest' | 'agent' | 'agentUser',
+ *   agentId?: string,           // agent identity object id (userType 'agent')
+ *   blueprintIds?: string[],    // its blueprint principal id and blueprint app id
+ *   agentUserId?: string,       // agent user object id (userType 'agentUser')
+ *   agentRisk?: 'none'|'low'|'medium'|'high',
+ *   authFlow?: 'none'|'deviceCodeFlow'|'authenticationTransfer',
+ *   insiderRisk?: 'none'|'minor'|'moderate'|'elevated',
  *   userId?: string,            // a specific user referenced by policies
  *   groupIds: string[],         // groups the user belongs to
  *   roleIds: string[],          // directory role template ids the user holds
@@ -28,12 +34,17 @@ import { grantSummary, sessionSummary, isWorkloadPolicy, describeGrant, appInSco
  *   userRisk: 'none'|'low'|'medium'|'high',
  * }
  */
-export function evaluate(policies, scenario, { strengthById = {}, namedLocations = [] } = {}) {
+export function evaluate(policies, scenario, { strengthById = {}, namedLocations = [], agentUserIds = new Set() } = {}) {
   const locs = new Map(namedLocations.map((l) => [l.id, l]));
   const results = [];
+  const subject = scenario.userType;
   for (const p of policies) {
     if (p.state === 'disabled' || isWorkloadPolicy(p)) continue;
-    const r = matchPolicy(p, scenario, locs);
+    const agentPol = isAgentPolicy(p);
+    const agentUserPol = !agentPol && isAgentUserPolicy(p, agentUserIds);
+    // Each policy type only ever applies to its own kind of token subject.
+    if (subject === 'agent' ? !agentPol : subject === 'agentUser' ? !agentUserPol : (agentPol || agentUserPol)) continue;
+    const r = subject === 'agent' ? matchAgentPolicy(p, scenario) : matchPolicy(p, scenario, locs);
     const gs = grantSummary(p, strengthById);
     results.push({
       id: p.id,
@@ -57,6 +68,34 @@ export function evaluate(policies, scenario, { strengthById = {}, namedLocations
   };
 }
 
+function riskLevels(v) {
+  if (!v) return [];
+  return (Array.isArray(v) ? v : String(v).split(',')).map((x) => x.trim()).filter(Boolean);
+}
+
+// Agent identity acting on its own (autonomous app-only token).
+function matchAgentPolicy(p, s) {
+  const c = p.conditions || {};
+  const ca = c.clientApplications || {};
+  const inc = ca.includeAgentIdServicePrincipals || [];
+  const exc = ca.excludeAgentIdServicePrincipals || [];
+  const ids = [s.agentId, ...(s.blueprintIds || [])].filter(Boolean);
+  const notEvaluated = [];
+  const included = inc.includes('All') || inc.some((x) => ids.includes(x));
+  if (!included && !ca.agentIdServicePrincipalFilter) return { applies: false, reason: 'Agent not in scope', notEvaluated };
+  if (!included) notEvaluated.push('agent attribute filter');
+  if (exc.some((x) => ids.includes(x))) return { applies: false, reason: 'Agent excluded', notEvaluated };
+  if (ca.agentIdServicePrincipalFilter && included) notEvaluated.push('agent attribute filter');
+  const a = c.applications || {};
+  const inApps = a.includeApplications || [];
+  if (!(inApps.includes('All') || inApps.some((x) => /agent/i.test(x)) || appInScope(p, s.appId))) {
+    return { applies: false, reason: (a.excludeApplications || []).includes(s.appId) ? 'Resource excluded' : 'Resource not in scope', notEvaluated };
+  }
+  const levels = riskLevels(c.agentIdRiskLevels);
+  if (levels.length && !levels.includes(s.agentRisk || 'none')) return { applies: false, reason: 'Agent risk does not match', notEvaluated };
+  return { applies: true, reason: notEvaluated.length ? 'Applies (some conditions not evaluated)' : 'Applies', notEvaluated };
+}
+
 function matchPolicy(p, s, locs) {
   const c = p.conditions || {};
   const notEvaluated = [];
@@ -65,16 +104,25 @@ function matchPolicy(p, s, locs) {
   const u = c.users || {};
   const inUsers = (u.includeUsers || []);
   const isGuest = s.userType === 'guest';
-  const userIncluded = inUsers.includes('All') ||
+  if (s.userType === 'agentUser') {
+    const inc = inUsers.some((x) => /agent/i.test(x)) || (s.agentUserId && inUsers.includes(s.agentUserId));
+    if (!inc) return { applies: false, reason: 'Agent user not in scope', notEvaluated };
+    if (s.agentUserId && (u.excludeUsers || []).includes(s.agentUserId)) return { applies: false, reason: 'Agent user excluded', notEvaluated };
+    const levels = riskLevels(c.agentIdRiskLevels);
+    if (levels.length && !levels.includes(s.agentRisk || 'none')) return { applies: false, reason: 'Agent risk does not match', notEvaluated };
+    if (c.agentExecutionEnvironments || c.devices?.deviceFilter) notEvaluated.push('agent execution environment');
+  }
+  const userIncluded = s.userType === 'agentUser' ||
+    inUsers.includes('All') ||
     (isGuest && (inUsers.includes('GuestsOrExternalUsers') || !!u.includeGuestsOrExternalUsers)) ||
     (s.userId && inUsers.includes(s.userId)) ||
     (u.includeGroups || []).some((g) => s.groupIds.includes(g)) ||
     (u.includeRoles || []).some((r) => s.roleIds.includes(r));
   if (!userIncluded) return { applies: false, reason: 'User not in scope', notEvaluated };
-  const userExcluded = (s.userId && (u.excludeUsers || []).includes(s.userId)) ||
+  const userExcluded = s.userType !== 'agentUser' && ((s.userId && (u.excludeUsers || []).includes(s.userId)) ||
     (u.excludeGroups || []).some((g) => s.groupIds.includes(g)) ||
     (u.excludeRoles || []).some((r) => s.roleIds.includes(r)) ||
-    (isGuest && (!!u.excludeGuestsOrExternalUsers || (u.excludeUsers || []).includes('GuestsOrExternalUsers')));
+    (isGuest && (!!u.excludeGuestsOrExternalUsers || (u.excludeUsers || []).includes('GuestsOrExternalUsers'))));
   if (userExcluded) return { applies: false, reason: 'User excluded', notEvaluated };
 
   // Applications
@@ -118,9 +166,14 @@ function matchPolicy(p, s, locs) {
   if ((c.signInRiskLevels || []).length && !c.signInRiskLevels.includes(s.signInRisk)) return { applies: false, reason: 'Sign-in risk does not match', notEvaluated };
   if ((c.userRiskLevels || []).length && !c.userRiskLevels.includes(s.userRisk)) return { applies: false, reason: 'User risk does not match', notEvaluated };
 
+  // Authentication flows: the policy only applies to those flows.
+  const flows = riskLevels(c.authenticationFlows?.transferMethods);
+  if (flows.length && !flows.includes(s.authFlow || 'none')) return { applies: false, reason: 'Only applies to device code or authentication transfer', notEvaluated };
+  // Insider risk (Purview Adaptive Protection).
+  const insider = riskLevels(c.insiderRiskLevels);
+  if (insider.length && !insider.includes(s.insiderRisk || 'none')) return { applies: false, reason: 'Insider risk does not match', notEvaluated };
+
   if (c.devices?.deviceFilter) notEvaluated.push('device filter');
-  if (c.authenticationFlows?.transferMethods) notEvaluated.push('authentication flows');
-  if ((c.insiderRiskLevels || '').length) notEvaluated.push('insider risk');
   if ((c.servicePrincipalRiskLevels || []).length) notEvaluated.push('service principal risk');
 
   return { applies: true, reason: notEvaluated.length ? 'Applies (some conditions not evaluated)' : 'Applies', notEvaluated };
@@ -130,8 +183,11 @@ function matchPolicy(p, s, locs) {
 const ADMIN_PORTAL_APPS = new Set(['797f4846-ba00-4fd7-ba43-dac1f8f63013']);
 
 function combine(applying, s) {
+  const isAgent = s.userType === 'agent' || s.userType === 'agentUser';
   if (!applying.length) {
-    return { verdict: 'open', label: 'Allowed with password only', detail: 'No enforced policy applies. The sign-in succeeds with a password alone.', requirements: [], blockedBy: [] };
+    return isAgent
+      ? { verdict: 'open', label: 'Allowed: no agent policy applies', detail: 'The agent gets a token without any Conditional Access check. Policies for users never apply to agents.', requirements: [], blockedBy: [] }
+      : { verdict: 'open', label: 'Allowed with password only', detail: 'No enforced policy applies. The sign-in succeeds with a password alone.', requirements: [], blockedBy: [] };
   }
   const blockedBy = applying.filter((r) => r.gs.block);
   if (blockedBy.length) {

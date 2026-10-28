@@ -15,8 +15,10 @@ import {
   isEnabled, isReportOnly, usersOf, appsOf, isWorkloadPolicy, targetsAllUsers,
   targetsAllResources, isUserActionPolicy, isAuthContextPolicy, appInScope, appExcluded,
   grantSummary, sessionSummary, conditionalScope, exclusionCount, isMicrosoftManaged,
-  describeGrant, STATE_LABEL,
+  describeGrant, STATE_LABEL, isAgentPolicy, isAgentUserPolicy, isNonUserPolicy,
 } from './policy.js';
+import { analyzeAgents, agentFindings, buildPermissionIndex, workloadPermissionFindings, permissionsForApp } from './agents.js';
+import { analyzePurview, purviewFindings } from './purview.js';
 
 const DAY = 86400000;
 const UNUSED_DAYS = 90;
@@ -24,11 +26,12 @@ const SEVERITY_ORDER = ['critical', 'high', 'medium', 'low', 'info'];
 const PENALTY = { critical: 30, high: 15, medium: 7, low: 3, info: 0 };
 
 export const AREAS = {
-  access: { label: 'Access coverage', weight: 0.25 },
-  exceptions: { label: 'Exceptions', weight: 0.2 },
-  dlp: { label: 'Data protection', weight: 0.2 },
-  workload: { label: 'Workload identities', weight: 0.15 },
-  locations: { label: 'Named locations', weight: 0.1 },
+  access: { label: 'Access coverage', weight: 0.22 },
+  exceptions: { label: 'Exceptions', weight: 0.18 },
+  dlp: { label: 'Data protection & Purview', weight: 0.18 },
+  workload: { label: 'Workload identities', weight: 0.12 },
+  agents: { label: 'AI agents', weight: 0.12 },
+  locations: { label: 'Named locations', weight: 0.08 },
   crown: { label: 'Crown jewels', weight: 0.1 },
 };
 
@@ -40,6 +43,7 @@ export const CATEGORY_LABEL = {
   saas: 'Third-party SaaS',
   microsoft: 'Microsoft',
   managedIdentity: 'Managed identity',
+  agent: 'AI agent',
   other: 'Other',
 };
 
@@ -57,6 +61,11 @@ export function analyze(raw, options = {}) {
   const workload = analyzeWorkload(ctx);
   const dlp = analyzeDlp(ctx);
   const baseline = analyzeBaseline(ctx);
+  const agents = analyzeAgents(raw, ctx);
+  const purview = analyzePurview(raw, options.purview || null, {
+    now: ctx.now, dlpControls: dlp.controls, enforcedAuthContexts: new Set(dlp.enforcedAuthContexts),
+    agentsInUse: agents.inUse, rmsExcluded: dlp.rmsExcluded,
+  });
 
   findingsFromBaseline(baseline, ctx, add);
   findingsFromPolicies(policies, ctx, add);
@@ -64,11 +73,14 @@ export function analyze(raw, options = {}) {
   findingsFromExclusions(exclusions, ctx, add);
   findingsFromLocations(locations, ctx, add);
   findingsFromWorkload(workload, ctx, add);
+  workloadPermissionFindings(raw, ctx, add);
   findingsFromDlp(dlp, add);
+  purviewFindings(purview, agents.inUse, add);
+  agentFindings(agents, add);
   findingsFromCrownJewels(apps.filter((a) => a.crownJewel), add);
 
   findings.sort((a, b) => SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity));
-  const scores = score(findings, crownJewels.size > 0);
+  const scores = score(findings, { crown: crownJewels.size > 0, agents: agents.inUse });
   const workforce = workforceOutsideMfa(ctx, baseline);
   const summary = {
     tenantName: ctx.org?.displayName || 'Your tenant',
@@ -81,6 +93,7 @@ export function analyze(raw, options = {}) {
       reportOnly: ctx.policies.filter(isReportOnly).length,
       disabled: ctx.policies.filter((p) => p.state === 'disabled').length,
       workload: ctx.policies.filter(isWorkloadPolicy).length,
+      agents: ctx.policies.filter((p) => isAgentPolicy(p) || isAgentUserPolicy(p, ctx.agentUserIds)).length,
     },
     apps: {
       business: apps.length,
@@ -93,10 +106,12 @@ export function analyze(raw, options = {}) {
     workforceOutsideMfa: workforce,
     findings: countBy(findings, 'severity'),
     usageDataAvailable: ctx.usageKnown,
+    agents: agents.totals,
+    purview: { ...purview.totals, imported: !!purview.imported },
   };
 
   const result = {
-    summary, scores, findings, policies, apps, exclusions, locations, workload, dlp, baseline,
+    summary, scores, findings, policies, apps, exclusions, locations, workload, dlp, baseline, agents, purview,
     sources: raw.sources || {},
     lookups: {
       groups: Object.values(ctx.dir).filter((o) => isType(o, 'group')).map((g) => ({ id: g.id, name: g.displayName, size: ctx.groupSizes[g.id] ?? null })),
@@ -136,7 +151,9 @@ function buildContext(raw, now) {
     });
   }
   const usageKnown = !!raw.sources?.spSignIns?.ok || (raw.spSignIns || []).length > 0;
-  const enabledUserPolicies = policies.filter((p) => isEnabled(p) && !isWorkloadPolicy(p));
+  const agentUserIds = new Set((raw.agentUsers || []).map((u) => u.id));
+  // Workload identity, agent and agent-user policies never apply to people.
+  const enabledUserPolicies = policies.filter((p) => isEnabled(p) && !isNonUserPolicy(p, agentUserIds));
   const tenantId = raw.organization?.id || null;
   return {
     now,
@@ -159,6 +176,11 @@ function buildContext(raw, now) {
     userCounts: raw.userCounts || { total: 0, guests: 0 },
     signIns,
     usageKnown,
+    agentUserIds,
+    agentIdentities: raw.agentIdentities || [],
+    agentBlueprints: raw.agentBlueprints || [],
+    agentsListed: !!raw.sources?.agentIdentities?.ok,
+    perms: buildPermissionIndex(raw, roleNames),
     gs: (p) => grantSummary(p, strengthById),
   };
 }
@@ -192,6 +214,7 @@ export function classifyApp(sp, tenantId) {
   if (sp.preferredSingleSignOnMode === 'saml') return 'saml';
   if (sp.preferredSingleSignOnMode === 'password') return 'passwordSso';
   if (sp.servicePrincipalType === 'ManagedIdentity') return 'managedIdentity';
+  if (sp.servicePrincipalType === 'ServiceIdentity' || /agentIdentity/i.test(sp['@odata.type'] || '')) return 'agent';
   if (MICROSOFT_TENANT_IDS.has(sp.appOwnerOrganizationId)) return 'microsoft';
   if (tenantId && sp.appOwnerOrganizationId === tenantId) return 'tenantApp';
   if (sp.servicePrincipalType === 'Application') return 'saas';
@@ -288,6 +311,8 @@ function analyzePolicies(ctx) {
     const u = usersOf(p);
     const a = appsOf(p);
     const kind = isWorkloadPolicy(p) ? 'Workload identities'
+      : isAgentPolicy(p) ? 'AI agents'
+        : isAgentUserPolicy(p, ctx.agentUserIds) ? 'Agent users'
       : isUserActionPolicy(p) ? 'User action'
         : isAuthContextPolicy(p) ? 'Authentication context' : 'Users and apps';
     const reportOnlyDays = isReportOnly(p) ? daysSince(p.modifiedDateTime || p.createdDateTime, ctx.now) : null;
@@ -298,7 +323,7 @@ function analyzePolicies(ctx) {
       stateLabel: STATE_LABEL[p.state] || p.state,
       kind,
       microsoftManaged: isMicrosoftManaged(p),
-      users: targetsAllUsers(p) ? 'All users' : describeUserScope(u, ctx),
+      users: isAgentPolicy(p) ? describeAgentScope(p) : targetsAllUsers(p) ? 'All users' : describeUserScope(u, ctx),
       apps: describeAppScope(a, ctx),
       conditions: conditionalScope(p),
       controls: describeGrant(gs),
@@ -309,6 +334,14 @@ function analyzePolicies(ctx) {
       modified: p.modifiedDateTime || p.createdDateTime || null,
     };
   });
+}
+
+function describeAgentScope(p) {
+  const c = p.conditions?.clientApplications || {};
+  const inc = c.includeAgentIdServicePrincipals || [];
+  if (inc.includes('All')) return 'All agent identities';
+  if (c.agentIdServicePrincipalFilter && !inc.length) return 'Agents by attribute';
+  return `${inc.length} agent${inc.length === 1 ? '' : 's'}`;
 }
 
 function describeUserScope(u, ctx) {
@@ -500,6 +533,27 @@ function analyzeExclusions(ctx, crownJewels) {
       out.push({ ...base, kind: 'Platform', targetId: plat, targetName: plat, verdict: 'review', reason: 'Device platform is reported by the client and can be spoofed. Platform exclusions are a weak way to avoid breaks.', fix: 'Use a device filter or a dedicated policy for that platform.' });
     }
 
+    const agentCa = p.conditions?.clientApplications || {};
+    if ((agentCa.excludeAgentIdServicePrincipals || []).length || (agentCa.agentIdServicePrincipalFilter && (agentCa.includeAgentIdServicePrincipals || []).length)) {
+      const riskBased = !!(p.conditions?.agentIdRiskLevels || '').length;
+      const allowList = gs.block && !riskBased;
+      const agentById = new Map([...(ctx.agentIdentities || []), ...(ctx.agentBlueprints || [])].map((x) => [x.id, x]));
+      for (const id of agentCa.excludeAgentIdServicePrincipals || []) {
+        const o = agentById.get(id) || ctx.spById.get(id) || ctx.dir[id];
+        const known = !!o || !ctx.agentsListed;
+        const name = o?.displayName || 'Unknown agent';
+        out.push({
+          ...base, kind: 'Agent', targetId: id, targetName: name,
+          verdict: !known ? 'stale' : allowList ? 'justified' : 'gap',
+          reason: !known ? 'This agent or blueprint no longer exists.' : allowList ? 'Approved agent in an allow-list policy (block all other agents). This is the intended pattern.' : riskBased ? 'This agent keeps working even when ID Protection rates it high risk.' : 'This agent skips the agent policy.',
+          fix: !known ? 'Remove the exclusion.' : allowList ? 'Keep it documented with the approving sponsor, and review it with the agent\'s access review.' : 'Remove the exclusion so a compromised agent is blocked.',
+        });
+      }
+      if (agentCa.agentIdServicePrincipalFilter && (agentCa.includeAgentIdServicePrincipals || []).length) {
+        out.push({ ...base, kind: 'Agent', targetId: 'filter', targetName: 'Agents matching a custom security attribute filter', verdict: allowList ? 'justified' : 'review', reason: allowList ? 'Approved agents are excluded by attribute. Recommended: approval is recorded on the agent.' : 'Agents are selected by a custom security attribute rule.', fix: 'Confirm who can assign the attribute: they decide which agents are approved.' });
+      }
+    }
+
     for (const id of p.conditions?.clientApplications?.excludeServicePrincipals || []) {
       const sp = ctx.spById.get(id) || ctx.dir[id];
       out.push({ ...base, kind: 'Workload identity', targetId: id, targetName: sp?.displayName || 'Unknown service principal', verdict: sp ? 'review' : 'stale', reason: sp ? 'This service principal skips the workload identity policy.' : 'This service principal no longer exists.', fix: sp ? 'Confirm why and document it.' : 'Remove the exclusion.' });
@@ -623,9 +677,12 @@ function analyzeWorkload(ctx) {
     const usage = ctx.signIns.get(app.appId);
     const lastAppOnly = usage?.appOnly || null;
     const days = daysSince(usage?.last, now);
+    const perm = permissionsForApp(ctx, app.appId);
     return {
       appId: app.appId,
       name: app.displayName,
+      agentBlueprint: (ctx.agentBlueprints || []).some((b) => b.appId === app.appId),
+      permissions: perm,
       multiTenant: app.signInAudience && app.signInAudience !== 'AzureADMyOrg',
       secrets: secrets.length,
       certificates: creds.length - secrets.length,
@@ -662,6 +719,7 @@ function analyzeWorkload(ctx) {
       longLived: apps.filter((a) => a.longLivedSecrets > 0).length,
       dormant: apps.filter((a) => a.dormant).length,
       multiTenantWithSecrets: apps.filter((a) => a.multiTenant && a.secrets > 0).length,
+      highPrivilege: apps.filter((a) => a.permissions.critical.length || a.permissions.roles.length).length,
     },
   };
 }
@@ -775,8 +833,9 @@ function analyzeDlp(ctx) {
   const rmsExcluded = ctx.policies.filter((p) => p.state !== 'disabled' && appExcluded(p, RMS));
   return {
     controls,
+    enforcedAuthContexts: [...usedCtx],
     rmsExcluded: rmsExcluded.map((p) => p.displayName),
-    note: 'Purview DLP rules themselves are not readable through Microsoft Graph from the browser. This view covers the identity side of DLP: where and how people can reach the data your DLP policies protect.',
+    note: 'This view covers the identity side of DLP: where and how people can reach the data your DLP policies protect. The Purview tab adds sensitivity labels and, from an optional export, the DLP policies themselves.',
   };
 }
 
@@ -1016,13 +1075,14 @@ function findingsFromCrownJewels(crown, add) {
 // Scores and management answers
 // ---------------------------------------------------------------------------
 
-function score(findings, hasCrown) {
+function score(findings, applicable) {
   const areas = {};
   for (const [key, a] of Object.entries(AREAS)) {
     const pen = findings.filter((f) => f.area === key).reduce((s, f) => s + PENALTY[f.severity], 0);
     areas[key] = { label: a.label, score: Math.max(0, 100 - pen), weight: a.weight, findings: findings.filter((f) => f.area === key).length };
   }
-  if (!hasCrown) areas.crown.score = null;
+  if (!applicable.crown) areas.crown.score = null;
+  if (!applicable.agents && !areas.agents.findings) areas.agents.score = null;
   const used = Object.values(areas).filter((a) => a.score !== null);
   const w = used.reduce((s, a) => s + a.weight, 0);
   const overall = Math.round(used.reduce((s, a) => s + a.score * a.weight, 0) / w);
@@ -1100,8 +1160,8 @@ function managementQuestions(r, ctx) {
   const wlOn = r.workload.policies.filter((p) => p.state === 'enabled').length;
   q.push({
     q: 'Are non-human identities (apps, services, automation) under control?',
-    status: base('workload').status === 'present' && !wt.dormant ? 'good' : wt.dormant || wt.multiTenantWithSecrets ? 'bad' : 'warn',
-    a: `${plural(r.workload.apps.length, 'app registration')} hold credentials (${wt.withSecrets} with client secrets). ${plural(wt.dormant, 'app has', 'apps have')} valid credentials but no recent use; ${plural(wt.longLived, 'app has', 'apps have')} secrets valid for over a year. ${r.workload.policies.length ? `${plural(r.workload.policies.length, 'workload identity policy', 'workload identity policies')} exist, ${wlOn} enabled.` : 'No Conditional Access policy covers workload identities.'} ${plural(r.workload.managedIdentities, 'managed identity', 'managed identities')} in use (preferred: no secrets to leak).`,
+    status: base('workload').status === 'present' && !wt.dormant && !wt.highPrivilege ? 'good' : wt.dormant || wt.multiTenantWithSecrets || wt.highPrivilege ? 'bad' : 'warn',
+    a: `${plural(r.workload.apps.length, 'app registration')} hold credentials (${wt.withSecrets} with client secrets). ${plural(wt.dormant, 'app has', 'apps have')} valid credentials but no recent use; ${plural(wt.longLived, 'app has', 'apps have')} secrets valid for over a year. ${r.workload.policies.length ? `${plural(r.workload.policies.length, 'workload identity policy', 'workload identity policies')} exist, ${wlOn} enabled.` : 'No Conditional Access policy covers workload identities.'} ${plural(r.workload.managedIdentities, 'managed identity', 'managed identities')} in use (preferred: no secrets to leak).${wt.highPrivilege ? ` ${plural(wt.highPrivilege, 'app', 'apps')} can change tenant security through permissions or admin roles.` : ''}`,
   });
   const dc = r.dlp.controls;
   const present = dc.filter((c) => c.status === 'present').length;
@@ -1115,6 +1175,29 @@ function managementQuestions(r, ctx) {
     q: 'Are administrators protected against phishing?',
     status: adm.status === 'present' ? 'good' : adm.status === 'partial' ? 'warn' : 'bad',
     a: adm.detail,
+  });
+  const ag = r.agents;
+  const at = ag.totals;
+  const agCheck = (id) => ag.checks.find((c) => c.id === id)?.status;
+  q.push({
+    q: 'Are our AI agents governed, and could one be misused?',
+    status: !ag.inUse ? 'unknown'
+      : at.riskUnblocked || at.critical || agCheck('agentCa') === 'missing' ? 'bad'
+        : agCheck('agentCa') === 'present' && agCheck('agentRisk') === 'present' && !at.highPrivilege && !at.noSponsor ? 'good' : 'warn',
+    a: !ag.inUse
+      ? 'No AI agents were found (no Entra Agent ID identities or AI-like apps). Re-run when agents are introduced, and set up agent policies before the first one goes live.'
+      : `${plural(at.identities, 'agent identity', 'agent identities')}${at.agentUsers ? `, ${plural(at.agentUsers, 'agent user account')}` : ''}${at.candidates ? ` and ${plural(at.candidates, 'AI-like app')} outside Agent ID` : ''}. ${at.governed} of ${at.identities} covered by an enforced Conditional Access policy. ${plural(at.highPrivilege, 'agent holds', 'agents hold')} organisation-wide permissions${at.critical ? `, ${at.critical} of them can change tenant security` : ''}. ${at.atRisk ? `${plural(at.atRisk, 'agent is', 'agents are')} flagged risky${at.riskUnblocked ? ', not blocked' : ''}. ` : ''}${at.noSponsor ? `${plural(at.noSponsor, 'agent has', 'agents have')} no sponsor.` : ''}`.trim(),
+  });
+  const pv = r.purview;
+  const pvc = (id) => pv.checks.find((c) => c.id === id)?.status;
+  q.push({
+    q: 'Does Purview DLP cover where our data goes, including Copilot and agents?',
+    status: !pv.imported ? 'unknown'
+      : pvc('dlpCore') === 'present' && pvc('dlpCopilot') === 'present' && ['present', 'unknown'].includes(pvc('dlpEndpoint')) ? 'good'
+        : pvc('dlpCore') === 'missing' ? 'bad' : 'warn',
+    a: !pv.imported
+      ? `${pv.labels.length ? `${plural(pv.labels.length, 'sensitivity label')} found (${pv.totals.encrypting} encrypting). ` : ''}DLP policies are not readable through Graph: load a Purview export in the Purview tab to answer this.`
+      : `${plural(pv.totals.dlpPolicies, 'DLP policy', 'DLP policies')} (${pv.totals.enforced} enforced, ${pv.totals.test} in test mode) across ${pv.totals.locationsEnforced} enforced location${pv.totals.locationsEnforced === 1 ? '' : 's'}. Core workloads: ${pvc('dlpCore') === 'present' ? 'covered' : 'gaps'}. Copilot and agents: ${pvc('dlpCopilot') === 'present' ? 'covered' : 'not covered'}. Devices: ${pvc('dlpEndpoint') === 'present' ? 'Endpoint DLP backed by managed-device access' : pvc('dlpEndpoint') === 'partial' ? 'Endpoint DLP without a managed-device requirement' : 'not covered'}.`,
   });
   const top = r.findings.filter((f) => f.severity !== 'info').slice(0, 3);
   q.push({

@@ -6,7 +6,11 @@ import { esc, fmtDate } from './util.js';
 
 const SEV_LABEL = { critical: 'Critical', high: 'High', medium: 'Medium', low: 'Low', info: 'Info' };
 const Q_LABEL = { good: 'Yes', warn: 'Partly', bad: 'No', unknown: 'Not assessed' };
-const CTRL_LABEL = { present: 'In place', partial: 'Partial', missing: 'Missing' };
+const CTRL_LABEL = { present: 'In place', partial: 'Partial', missing: 'Missing', info: 'n/a', unknown: 'Not assessed' };
+const LOC_LABEL = {
+  exchange: 'Exchange email', sharePoint: 'SharePoint sites', oneDrive: 'OneDrive accounts', teams: 'Teams', endpoint: 'Devices (Endpoint DLP)',
+  mdca: 'Cloud apps (Defender for Cloud Apps)', onPrem: 'On-premises', powerBI: 'Power BI', copilot: 'Microsoft 365 Copilot and agents',
+};
 const VERDICT_LABEL = { gap: 'Opens a gap', review: 'Needs owner review', cleanup: 'Likely removable', stale: 'Points to deleted object', justified: 'Looks justified' };
 
 export function buildReportHtml(r, { demo = false } = {}) {
@@ -15,8 +19,8 @@ export function buildReportHtml(r, { demo = false } = {}) {
   const top = r.findings.filter((f) => f.severity !== 'info').slice(0, 10);
   const roadmap = {
     '30 days': r.findings.filter((f) => f.severity === 'critical' || (f.severity === 'high' && f.area !== 'workload')),
-    '60 days': r.findings.filter((f) => f.severity === 'high' && f.area === 'workload' || (f.severity === 'medium' && ['exceptions', 'crown', 'access'].includes(f.area))),
-    '90 days': r.findings.filter((f) => f.severity === 'medium' && !['exceptions', 'crown', 'access'].includes(f.area)),
+    '60 days': r.findings.filter((f) => f.severity === 'high' && f.area === 'workload' || (f.severity === 'medium' && ['exceptions', 'crown', 'access', 'agents'].includes(f.area))),
+    '90 days': r.findings.filter((f) => f.severity === 'medium' && !['exceptions', 'crown', 'access', 'agents'].includes(f.area)),
   };
   const crown = r.apps.filter((a) => a.crownJewel);
   const unprotected = r.apps.filter((a) => a.protection === 'none' && a.category !== 'microsoft').slice(0, 15);
@@ -51,7 +55,9 @@ export function buildReportHtml(r, { demo = false } = {}) {
   <tr><td>People outside the main MFA policy</td><td>${w.covered ? `${w.approximate ? 'at least ' : ''}${(w.people || 0).toLocaleString()}${w.percent !== null ? ` (${w.percent}%)` : ''}` : 'No MFA-for-everyone policy'}</td></tr>
   <tr><td>Business applications assessed</td><td>${s.apps.business} (${s.apps.unprotected} with no MFA policy, ${s.apps.excluded} excluded from a policy)</td></tr>
   <tr><td>Exceptions</td><td>${s.exclusionTotal} (${s.exclusions.gap || 0} gaps, ${s.exclusions.review || 0} to review, ${(s.exclusions.cleanup || 0) + (s.exclusions.stale || 0)} to clean up)</td></tr>
-  <tr><td>App registrations with credentials</td><td>${r.workload.apps.length} (${r.workload.totals.withSecrets} with client secrets)</td></tr>
+  <tr><td>App registrations with credentials</td><td>${r.workload.apps.length} (${r.workload.totals.withSecrets} with client secrets, ${r.workload.totals.highPrivilege} able to change tenant security)</td></tr>
+  <tr><td>AI agents (Entra Agent ID)</td><td>${r.agents.inUse ? `${r.agents.totals.identities} agent identities, ${r.agents.totals.governed} covered by an enforced policy, ${r.agents.totals.atRisk} risky` : 'None found'}</td></tr>
+  <tr><td>Purview DLP</td><td>${r.purview.imported ? `${r.purview.totals.dlpPolicies} policies (${r.purview.totals.enforced} enforced), ${r.purview.totals.labels} labels` : `Not assessed (no export loaded)${r.purview.labels.length ? `; ${r.purview.labels.length} sensitivity labels found` : ''}`}</td></tr>
 </table></section>
 
 <section><h2>Answers for management</h2>
@@ -100,6 +106,35 @@ ${r.dlp.controls.map((c) => `<tr><td><b>${esc(c.title)}</b><div class="note">${e
 <p class="note">${esc(r.dlp.note)}</p>
 </section>
 
+<section class="pb"><h2>AI agents</h2>
+${r.agents.inUse ? `<table class="kv">
+<tr><td>Agent identities</td><td>${r.agents.totals.identities} (${r.agents.totals.blueprints} blueprints, ${r.agents.totals.thirdParty} third-party)</td></tr>
+<tr><td>Covered by an enforced Conditional Access policy</td><td>${r.agents.totals.governed} of ${r.agents.totals.identities}</td></tr>
+<tr><td>Agent user accounts</td><td>${r.agents.totals.agentUsers}</td></tr>
+<tr><td>Flagged risky by ID Protection</td><td>${r.agents.totals.atRisk}${r.agents.totals.riskUnblocked ? ` (${r.agents.totals.riskUnblocked} not blocked)` : ''}</td></tr>
+<tr><td>Organisation-wide permissions</td><td>${r.agents.totals.highPrivilege} (${r.agents.totals.critical} can change tenant security)</td></tr>
+<tr><td>Without a sponsor</td><td>${r.agents.totals.noSponsor}</td></tr>
+<tr><td>AI-like apps outside Agent ID</td><td>${r.agents.totals.candidates}</td></tr>
+</table>
+<table class="grid"><thead><tr><th>Check</th><th>Status</th><th>Detail</th></tr></thead><tbody>
+${r.agents.checks.map((c) => `<tr><td><b>${esc(c.title)}</b></td><td><span class="st ${c.status}">${CTRL_LABEL[c.status] || c.status}</span></td><td>${esc(c.detail)}</td></tr>`).join('')}
+</tbody></table>
+${r.agents.agents.filter((a) => ['critical', 'high'].includes(a.severity)).length ? `<h3>Agents needing attention</h3><table class="grid"><thead><tr><th>Agent</th><th>Publisher</th><th>Issues</th></tr></thead><tbody>
+${r.agents.agents.filter((a) => ['critical', 'high'].includes(a.severity)).map((a) => `<tr><td><b>${esc(a.name)}</b></td><td>${esc(a.publisher)}</td><td>${a.issues.filter((i) => ['critical', 'high'].includes(i.severity)).map((i) => esc(i.text)).join(' ')}</td></tr>`).join('')}
+</tbody></table>` : ''}
+<p class="note">Policies for users never apply to an agent acting on its own, and "All users" does not include agent user accounts. Agents need their own policies.</p>`
+  : '<p>No AI agents (Entra Agent ID identities, agent user accounts or AI-like apps) were found. Set up agent policies in report-only before the first agent goes live.</p>'}
+</section>
+
+<section><h2>Purview: labels and DLP</h2>
+<table class="grid"><thead><tr><th>Check</th><th>Status</th><th>Detail</th></tr></thead><tbody>
+${r.purview.checks.map((c) => `<tr><td><b>${esc(c.title)}</b></td><td><span class="st ${c.status}">${CTRL_LABEL[c.status] || c.status}</span></td><td>${esc(c.detail)}</td></tr>`).join('')}
+</tbody></table>
+${r.purview.imported ? `<h3>DLP coverage by location</h3><table class="grid"><thead><tr><th>Location</th><th>Enforced policies</th><th>Test mode</th></tr></thead><tbody>
+${Object.entries(r.purview.coverage).map(([k, c]) => `<tr><td>${esc(LOC_LABEL[k] || k)}</td><td>${c.enforced || '<b>None</b>'}</td><td>${c.test || ''}</td></tr>`).join('')}
+</tbody></table><p class="note">From a Purview export (${esc(r.purview.imported.fileName || 'file')}${r.purview.imported.exportedAt ? `, ${esc(fmtDate(r.purview.imported.exportedAt))}` : ''}).</p>` : '<p class="note">DLP policies were not assessed: no Purview export was loaded.</p>'}
+</section>
+
 <section><h2>Named locations</h2>
 ${r.locations.length ? `<table class="grid"><thead><tr><th>Location</th><th>Type</th><th>Trusted</th><th>Used by</th><th>Observations</th></tr></thead><tbody>
 ${r.locations.map((l) => `<tr><td>${esc(l.name)}</td><td>${l.type === 'ip' ? `IP (${l.rangeCount} ranges)` : l.type === 'country' ? `Countries (${l.countries.length})` : 'Other'}</td><td>${l.trusted ? 'Yes' : 'No'}</td><td>${l.usedBy.length} policies</td><td>${l.issues.map((i) => esc(i.text)).join(' ') || 'None'}</td></tr>`).join('')}
@@ -110,6 +145,7 @@ ${r.locations.map((l) => `<tr><td>${esc(l.name)}</td><td>${l.type === 'ip' ? `IP
 <table class="kv">
 <tr><td>App registrations with credentials</td><td>${r.workload.apps.length}</td></tr>
 <tr><td>With client secrets</td><td>${r.workload.totals.withSecrets}</td></tr>
+<tr><td>Able to change tenant security (permissions or admin roles)</td><td>${r.workload.totals.highPrivilege}</td></tr>
 <tr><td>Valid credentials, no recent use</td><td>${r.workload.totals.dormant}</td></tr>
 <tr><td>Secrets valid for more than a year</td><td>${r.workload.totals.longLived}</td></tr>
 <tr><td>Credentials expiring within 30 days</td><td>${r.workload.totals.expiringSoon}</td></tr>
@@ -119,7 +155,7 @@ ${r.locations.map((l) => `<tr><td>${esc(l.name)}</td><td>${l.type === 'ip' ? `IP
 
 <section><h2>Scope and method</h2>
 <p>Read-only assessment of the Microsoft Entra configuration through Microsoft Graph, run in the assessor's browser. No data was stored outside the browser.
-Purview DLP rules are not readable through Graph and are out of scope; this report covers the identity controls that decide who can reach data, from where and on which devices.
+Purview DLP policies are not readable through Graph: ${r.purview.imported ? 'they were assessed from an export created by the customer with the EntraCompass PowerShell script and parsed in the browser' : 'no export was loaded, so DLP checks are marked "Not assessed"'}. AI agents were assessed from Microsoft Entra Agent ID (preview APIs), which can change.
 Application usage comes from the Entra application sign-in activity report${r.summary.usageDataAvailable ? '' : ' (not available for this tenant, so usage-based checks were skipped)'}.</p>
 ${failed.length ? `<p class="warn-box">Some sources could not be read and the related checks are incomplete: ${failed.map((f) => `${esc(f.label)} (${esc(f.reason)})`).join(', ')}.</p>` : ''}
 <p class="note">Generated by EntraCompass (github.com/arusso-aboutcloud/EntraCompass).</p>
@@ -147,6 +183,7 @@ table{width:100%;border-collapse:collapse}td,th{text-align:left;vertical-align:t
 .sev,.st{display:inline-block;font-size:11px;font-weight:600;padding:1px 8px;border-radius:999px;white-space:nowrap}
 .sev.critical{background:#fee2e2;color:#991b1b}.sev.high{background:#ffedd5;color:#9a3412}.sev.medium{background:#fef3c7;color:#92400e}.sev.low{background:#e0f2fe;color:#075985}
 .st.present{background:#d1fae5;color:#065f46}.st.partial{background:#fef3c7;color:#92400e}.st.missing{background:#fee2e2;color:#991b1b}
+.st.info,.st.unknown{background:#f1f5f9;color:#475569}
 .road{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.road-col{background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px}.road-col ul{margin:0;padding-left:18px}
 .warn-box{background:#fffbeb;border:1px solid #f59e0b;padding:8px 12px;border-radius:6px}
 tr,.road-col{break-inside:avoid}

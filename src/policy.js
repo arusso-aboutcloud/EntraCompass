@@ -27,6 +27,31 @@ export function isWorkloadPolicy(p) {
   return !!(c && ((c.includeServicePrincipals || []).length || c.servicePrincipalFilter));
 }
 
+// True when the policy targets agent identities (Entra Agent ID, autonomous
+// app-only access). Graph beta: clientApplications.includeAgentIdServicePrincipals
+// ('All' or agent / blueprint object IDs) or agentIdServicePrincipalFilter.
+export function isAgentPolicy(p) {
+  const c = p?.conditions?.clientApplications;
+  return !!(c && ((c.includeAgentIdServicePrincipals || []).length || c.agentIdServicePrincipalFilter));
+}
+
+// True when the policy targets agents' user accounts (agent users, preview).
+// The Graph representation is still in preview, so this matches any users
+// assignment value that names agent users (for example 'AllAgentIdUsers') or an
+// explicit list of known agent user IDs.
+export function isAgentUserPolicy(p, agentUserIds = new Set()) {
+  const u = p?.conditions?.users || {};
+  const inc = u.includeUsers || [];
+  if (inc.some((x) => /agent/i.test(x))) return true;
+  if (u.includeAgentUsers || u.includeAgentIdUsers) return true;
+  return inc.length > 0 && inc.every((x) => agentUserIds.has(x));
+}
+
+// Policies that do not apply to human user sign-ins.
+export function isNonUserPolicy(p, agentUserIds) {
+  return isWorkloadPolicy(p) || isAgentPolicy(p) || isAgentUserPolicy(p, agentUserIds);
+}
+
 export function targetsAllUsers(p) {
   return (usersOf(p).includeUsers || []).includes('All');
 }
@@ -140,6 +165,7 @@ export function conditionalScope(p) {
   if ((c.signInRiskLevels || []).length) parts.push('sign-in risk');
   if ((c.userRiskLevels || []).length) parts.push('user risk');
   if ((c.insiderRiskLevels || '').length) parts.push('insider risk');
+  if ((c.agentIdRiskLevels || '').length) parts.push('agent risk');
   if (c.devices?.deviceFilter) parts.push('device filter');
   if (c.authenticationFlows?.transferMethods) parts.push('authentication flow');
   return parts;
@@ -151,7 +177,7 @@ export function exclusionCount(p) {
   const c = p?.conditions?.clientApplications || {};
   return (u.excludeUsers || []).length + (u.excludeGroups || []).length + (u.excludeRoles || []).length +
     (u.excludeGuestsOrExternalUsers ? 1 : 0) + (a.excludeApplications || []).length +
-    (c.excludeServicePrincipals || []).length;
+    (c.excludeServicePrincipals || []).length + (c.excludeAgentIdServicePrincipals || []).length;
 }
 
 export function isMicrosoftManaged(p) {

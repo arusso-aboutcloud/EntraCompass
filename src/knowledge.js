@@ -102,4 +102,61 @@ export const DOCS = {
   adaptiveProtection: 'https://learn.microsoft.com/en-us/purview/insider-risk-management-adaptive-protection',
   reportOnly: 'https://learn.microsoft.com/en-us/entra/identity/conditional-access/concept-conditional-access-report-only',
   whatIf: 'https://learn.microsoft.com/en-us/entra/identity/conditional-access/what-if-tool',
+  agentCa: 'https://learn.microsoft.com/en-us/entra/identity/conditional-access/agent-id',
+  agentCaAutonomous: 'https://learn.microsoft.com/en-us/entra/identity/conditional-access/policy-autonomous-agents',
+  agentCaUsers: 'https://learn.microsoft.com/en-us/entra/identity/conditional-access/policy-agent-user',
+  agentIdentities: 'https://learn.microsoft.com/en-us/entra/agent-id/agent-identities',
+  agentGovernance: 'https://learn.microsoft.com/en-us/entra/id-governance/agent-id-governance-overview',
+  agentRisk: 'https://learn.microsoft.com/en-us/entra/id-protection/concept-risky-agents',
+  appPermissions: 'https://learn.microsoft.com/en-us/graph/permissions-overview',
+  sensitivityLabels: 'https://learn.microsoft.com/en-us/purview/sensitivity-labels',
+  dlpLocations: 'https://learn.microsoft.com/en-us/purview/dlp-policy-reference',
+  endpointDlp: 'https://learn.microsoft.com/en-us/purview/endpoint-dlp-learn-about',
+  dlpCopilot: 'https://learn.microsoft.com/en-us/purview/dlp-microsoft365-copilot-location-learn-about',
+  dspmAi: 'https://learn.microsoft.com/en-us/purview/dspm-for-ai',
+  labelAuthContext: 'https://learn.microsoft.com/en-us/purview/sensitivity-labels-teams-groups-sites',
 };
+
+// Application permissions (app roles) grouped by blast radius. Used for
+// workload identities and agents. Values are permission names, which are
+// stable across tenants; IDs are resolved from the tenant's own resource
+// service principals.
+export const PERMISSION_TIERS = {
+  // Can take over the tenant or grant itself more access.
+  critical: new Set([
+    'RoleManagement.ReadWrite.Directory', 'AppRoleAssignment.ReadWrite.All', 'Application.ReadWrite.All',
+    'Directory.ReadWrite.All', 'Policy.ReadWrite.ConditionalAccess', 'Policy.ReadWrite.AuthenticationMethod',
+    'UserAuthenticationMethod.ReadWrite.All', 'Domain.ReadWrite.All', 'Organization.ReadWrite.All',
+    'AgentIdentity.ReadWrite.All', 'full_access_as_app', 'Sites.FullControl.All', 'Exchange.ManageAsApp',
+  ]),
+  // Reads or changes business data across the whole organisation.
+  high: new Set([
+    'Mail.Read', 'Mail.ReadWrite', 'Mail.Send', 'MailboxSettings.ReadWrite', 'Files.Read.All', 'Files.ReadWrite.All',
+    'Sites.Read.All', 'Sites.ReadWrite.All', 'Sites.Manage.All', 'Chat.Read.All', 'Chat.ReadWrite.All',
+    'ChannelMessage.Read.All', 'User.ReadWrite.All', 'Group.ReadWrite.All', 'GroupMember.ReadWrite.All',
+    'Calendars.ReadWrite', 'Contacts.ReadWrite', 'Notes.ReadWrite.All', 'OnlineMeetingTranscript.Read.All',
+    'eDiscovery.ReadWrite.All', 'InformationProtectionPolicy.Read.All', 'SecurityEvents.ReadWrite.All',
+    'User.Export.All', 'Mail.ReadBasic.All', 'Calendars.Read', 'Contacts.Read', 'Chat.ReadBasic.All',
+  ]),
+};
+
+// Delegated scopes that let an app (or agent) read or change broad business
+// data on behalf of users.
+export const BROAD_DELEGATED_SCOPES = new Set([
+  'Mail.Read', 'Mail.ReadWrite', 'Mail.Send', 'Files.Read.All', 'Files.ReadWrite.All', 'Sites.Read.All',
+  'Sites.ReadWrite.All', 'Directory.ReadWrite.All', 'Directory.AccessAsUser.All', 'Chat.Read', 'Chat.ReadWrite',
+  'User.ReadWrite.All', 'Group.ReadWrite.All', 'Notes.ReadWrite.All', 'Calendars.ReadWrite', 'EWS.AccessAsUser.All',
+  'full_access_as_user', 'AllSites.FullControl', 'MyFiles.Write',
+]);
+
+// Resources whose application permissions are checked: Microsoft Graph,
+// Exchange Online and SharePoint Online.
+export const PERMISSION_RESOURCES = {
+  '00000003-0000-0000-c000-000000000000': 'Microsoft Graph',
+  '00000002-0000-0ff1-ce00-000000000000': 'Exchange Online',
+  '00000003-0000-0ff1-ce00-000000000000': 'SharePoint Online',
+};
+
+// Names that suggest an AI agent or assistant registered as an ordinary app
+// (not in Entra Agent ID). Used only to *suggest* candidates.
+export const AGENT_NAME_HINT = /(^|[^a-z])(agent|agents|agentic|copilot|gpt|openai|azure ?openai|chatbot|bot|llm|assistant|mcp|langchain|semantic kernel|ai)([^a-z]|$)/i;

@@ -24,6 +24,11 @@ These are design commitments. Changes that break them will not be merged.
 | Enterprise apps, app registrations, credential metadata (dates only, never secret values) | Graph | Medium | Memory and `sessionStorage` | Tab session |
 | Names and UPNs of users, groups and service principals named in policies; group member counts | Graph | Personal data (names, UPNs) | Memory and `sessionStorage` | Tab session |
 | App sign-in dates | Graph (beta report) | Medium | Memory and `sessionStorage` | Tab session |
+| AI agents: agent identities, blueprints, sponsors (names), agent user accounts (names, UPNs), agent risk | Graph (beta, Entra Agent ID and ID Protection) | Medium; sponsor and agent-user names are personal data | Memory and `sessionStorage` | Tab session |
+| Application permissions, delegated grants, directory role assignments (IDs and permission names) | Graph | High: shows who can change the tenant | Memory and `sessionStorage` | Tab session |
+| Sensitivity label names and settings | Graph (labels published to the signed-in admin) | Medium | Memory and `sessionStorage` | Tab session |
+| Purview export: DLP policy and rule names, modes, locations, actions, sensitive information type names; label names and settings | A JSON file the admin creates and opens in the page | High: describes your DLP design. Email addresses are redacted by the export script | Read with the File API, parsed in the page, kept in memory and `sessionStorage`. Never uploaded | Tab session, or until "Remove" |
+| Theme choice | The user | None | `sessionStorage` | Tab session |
 | Crown-jewel tags | The user | Low | `sessionStorage`; optional JSON download | Tab session / user's file |
 | Analysis results, report | Computed locally | High | Memory; downloads the user makes | Tab session / user's file |
 | AI question and summary | The user / computed | Low: no identifiers | Sent to `/ai/ask`, not stored | Single request |
@@ -39,10 +44,11 @@ Graph never returns secret or certificate *values* for app credentials; EntraCom
 | 3 | App delivery | Cloudflare Pages to browser | TLS 1.2+ (1.3 preferred), HSTS preload, WAF, security headers |
 | 4 | Optional AI | Browser to `/ai/ask` (Cloudflare) to Workers AI | Origin allow-list, rate limits, input filters, aggregated payload only |
 | 5 | Downloads | Browser to the user's disk | Explicit user action; CSV cells escaped against formula injection |
+| 6 | Purview export | User's disk to the browser tab (File API) | Never leaves the browser; 5 MB cap; parsed as data (JSON), every value escaped before display |
 
 ### What the AI endpoint receives
 
-Built in `aiSummary()` in `src/main.js`: overall and per-area scores, policy counts, user and guest totals, percentage outside MFA, app and exception counts by verdict, workload credential totals, DLP control and baseline statuses, and up to 25 finding titles. Quoted names in titles are replaced with "an app"; named-location titles drop the location name. No user names, UPNs, object IDs, IP ranges, policy JSON or tokens. The function does not store requests; Workers AI processes the prompt to produce the answer.
+Built in `aiSummary()` in `src/main.js`: overall and per-area scores, policy counts, user and guest totals, percentage outside MFA, app and exception counts by verdict, workload credential totals, AI agent totals and agent check statuses, Purview totals and check statuses, DLP control and baseline statuses, and up to 30 finding titles. Agent and Purview finding titles are counts, never names. Quoted names in titles are replaced with "an app"; named-location titles drop the location name. No user names, UPNs, object IDs, IP ranges, policy JSON or tokens. The function does not store requests; Workers AI processes the prompt to produce the answer.
 
 ## Trust boundaries and threats
 

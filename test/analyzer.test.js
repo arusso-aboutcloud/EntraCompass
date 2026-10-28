@@ -9,10 +9,11 @@ const NOW = '2026-10-19T12:00:00Z';
 const r = analyze(fixture, { now: NOW, crownJewels: [IDS.sapApp] });
 
 test('summary counts policies by state', () => {
-  assert.equal(r.summary.policyCounts.total, 7);
-  assert.equal(r.summary.policyCounts.enabled, 5);
-  assert.equal(r.summary.policyCounts.reportOnly, 1);
+  assert.equal(r.summary.policyCounts.total, 12);
+  assert.equal(r.summary.policyCounts.enabled, 7);
+  assert.equal(r.summary.policyCounts.reportOnly, 4);
   assert.equal(r.summary.policyCounts.workload, 1);
+  assert.equal(r.summary.policyCounts.agents, 2);
 });
 
 test('emergency accounts are recognised, other user exclusions need review', () => {
@@ -62,8 +63,8 @@ test('workforce outside MFA counts excluded users and group members', () => {
 
 test('workload identities: long-lived, multi-tenant, expired, expiring', () => {
   const t = r.workload.totals;
-  assert.equal(t.withSecrets, 2);
-  assert.equal(t.longLived, 1);
+  assert.equal(t.withSecrets, 3);
+  assert.equal(t.longLived, 2); // Nightly batch and the AI connector
   assert.equal(t.multiTenantWithSecrets, 1);
   assert.equal(t.expired, 1);
   assert.equal(t.expiringSoon, 1); // Old integration expires 2026-11-01
@@ -81,7 +82,7 @@ test('DLP: MDA monitor-only is partial; auth context defined but unused', () => 
 
 test('scores are within range and management questions are answered', () => {
   assert.ok(r.scores.overall >= 0 && r.scores.overall <= 100);
-  assert.equal(r.questions.length, 9);
+  assert.equal(r.questions.length, 11);
   for (const q of r.questions) assert.ok(q.a.length > 10);
 });
 
@@ -133,6 +134,40 @@ test('what-if: report-only compliant-device policy would break unmanaged desktop
   const w = evaluate(fixture.policies, { ...base, appId: '00000002-0000-0ff1-ce00-000000000000', locationId: 'untrusted', clientApp: 'mobileAppsAndDesktopClients' }, opts);
   assert.equal(w.outcome.verdict, 'challenge');
   assert.equal(w.reportOnlyOutcome.verdict, 'fails');
+});
+
+test('policies scoped to device code or insider risk do not apply to a normal sign-in', () => {
+  const w = evaluate(fixture.policies, { ...base, appId: IDS.intranetApp, locationId: 'untrusted' }, opts);
+  const dc = w.results.find((x) => x.id === 'p9');
+  assert.equal(dc.applies, false);
+  const dcFlow = evaluate(fixture.policies, { ...base, appId: IDS.intranetApp, locationId: 'untrusted', authFlow: 'deviceCodeFlow' }, opts);
+  assert.equal(dcFlow.outcome.verdict, 'blocked');
+  const ir = evaluate(fixture.policies, { ...base, appId: '00000002-0000-0ff1-ce00-000000000000', locationId: 'untrusted', insiderRisk: 'elevated' }, opts);
+  assert.equal(ir.reportOnlyOutcome.verdict, 'blocked');
+});
+
+test('what-if: user policies never apply to an agent; agent policies never apply to people', () => {
+  const agent = evaluate(fixture.policies, { ...base, userType: 'agent', agentId: IDS.salesAgent, blueprintIds: [IDS.bpVendor, IDS.bpVendorApp], appId: '00000003-0000-0000-c000-000000000000', agentRisk: 'none' }, opts);
+  assert.equal(agent.outcome.verdict, 'open');
+  assert.ok(agent.results.every((x) => ['p10', 'p11'].includes(x.id)));
+  // Not in the allow-list: report-only policy would block it.
+  assert.equal(agent.reportOnlyOutcome.verdict, 'blocked');
+  const approved = evaluate(fixture.policies, { ...base, userType: 'agent', agentId: IDS.hrAgent, blueprintIds: [IDS.bpCopilotStudio, IDS.bpCopilotStudioApp], appId: '00000003-0000-0000-c000-000000000000', agentRisk: 'none' }, opts);
+  assert.equal(approved.reportOnlyOutcome?.verdict ?? approved.outcome.verdict, 'open');
+  const human = evaluate(fixture.policies, { ...base, appId: IDS.intranetApp, locationId: 'untrusted' }, opts);
+  assert.ok(!human.results.some((x) => ['p10', 'p11'].includes(x.id)));
+});
+
+test('agent and workload-identity policies are not counted as user policies', () => {
+  assert.equal(r.summary.workforceOutsideMfa.people, 4 + 140);
+  assert.equal(r.policies.find((p) => p.id === 'p10').kind, 'AI agents');
+  assert.equal(r.policies.find((p) => p.id === 'p10').users, 'All agent identities');
+});
+
+test('agent exclusions from an allow-list are justified', () => {
+  const ex = r.exclusions.filter((e) => e.kind === 'Agent');
+  assert.equal(ex.length, 2);
+  assert.ok(ex.every((e) => e.verdict === 'justified'));
 });
 
 test('a conditional block policy does not count as MFA coverage', () => {
