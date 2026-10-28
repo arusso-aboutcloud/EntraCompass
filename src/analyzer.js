@@ -30,7 +30,7 @@ export const AREAS = {
   exceptions: { label: 'Exceptions', weight: 0.18 },
   dlp: { label: 'Data protection & Purview', weight: 0.18 },
   workload: { label: 'Workload identities', weight: 0.12 },
-  agents: { label: 'AI agents', weight: 0.12 },
+  agents: { label: 'AI agents (preview)', weight: 0.12 },
   locations: { label: 'Named locations', weight: 0.08 },
   crown: { label: 'Crown jewels', weight: 0.1 },
 };
@@ -1180,7 +1180,7 @@ function managementQuestions(r, ctx) {
   const at = ag.totals;
   const agCheck = (id) => ag.checks.find((c) => c.id === id)?.status;
   q.push({
-    q: 'Are our AI agents governed, and could one be misused?',
+    q: 'Are our AI agents governed, and could one be misused? (preview)',
     status: !ag.inUse ? 'unknown'
       : at.riskUnblocked || at.critical || agCheck('agentCa') === 'missing' ? 'bad'
         : agCheck('agentCa') === 'present' && agCheck('agentRisk') === 'present' && !at.highPrivilege && !at.noSponsor ? 'good' : 'warn',

@@ -158,7 +158,8 @@ label > input, label > select { margin-top: 4px; }
 .theme-toggle:hover { color: var(--text); background: var(--surface-2); }
 .landing-theme { position: absolute; top: 14px; right: 14px; }
 .setup-card { position: relative; }
-.new-tag { display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--primary); background: var(--primary-soft); border-radius: 999px; padding: 1px 7px; vertical-align: middle; }
+.preview-tag { display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--warn); background: var(--warn-soft); border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent); border-radius: 999px; padding: 0 7px; vertical-align: middle; cursor: help; }
+.preview-dot { font-size: 9px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--warn); margin-left: 4px; }
 
 /* Page header */
 .page-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; margin-bottom: 18px; }
