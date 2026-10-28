@@ -82,9 +82,9 @@ An application that signs in through Entra (SAML, OpenID Connect, App Proxy) is 
 
      | Permission | Used for |
      |---|---|
-     | `AgentIdentity.Read.All` | Agent identities, blueprints and sponsors (Entra Agent ID). Without it, agents are found among service principals in a reduced mode |
-     | `IdentityRiskyAgent.Read.All` | Agent risk from ID Protection |
-     | `InformationProtectionPolicy.Read` | Sensitivity labels published to the signed-in admin |
+     | `AgentIdentity.Read.All` | Agent identities, blueprints and sponsors (Entra Agent ID). Admin consent. The signed-in account also needs a supported Agent ID role (for example Agent ID Administrator). Without either, agents are found among service principals in a reduced mode |
+     | `IdentityRiskyAgent.Read.All` | Agent risk from ID Protection. Admin consent; readable by Security Reader or Global Reader |
+     | `InformationProtectionPolicy.Read` | Sensitivity labels published to the signed-in admin (no admin consent needed). For all labels and DLP policies, use the Purview export |
 
    Or run [`infra/New-EntraCompassApp.ps1`](infra/New-EntraCompassApp.ps1) `-GrantAdminConsent -IncludeOptional`.
    Optional permissions are not requested at sign-in: once consented, Entra includes them in the Graph token automatically, so adding them later never breaks sign-in.
