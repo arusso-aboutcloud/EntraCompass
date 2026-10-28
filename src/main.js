@@ -703,7 +703,7 @@ function viewAgents() {
   const list = ag.agents.filter((a) => f === 'all' || (f === 'risk' && ['critical', 'high'].includes(a.severity)) || (f === 'ungoverned' && !a.governed) || (f === 'nosponsor' && a.sponsors === 0) || (f === 'thirdparty' && a.publisher === 'Third party'));
   return `
   <div class="page-head"><div><h1 class="page-title">AI agents <span class="new-tag">New</span></h1>
-    <p class="muted page-sub">Microsoft Entra Agent ID gives AI agents their own identities. Conditional Access treats them differently from people: you secure each <b>access pattern</b> separately.</p></div>
+    <p class="muted page-sub">Microsoft Entra Agent ID gives AI agents their own identities. Conditional Access treats them differently from people: you secure each <b>access pattern</b> separately. <span class="hint-tag" title="Agent ID, Conditional Access for agents and agent risk use Microsoft Graph beta APIs, which can change.">Preview APIs</span></p></div>
     <button class="btn btn-ghost btn-sm" data-action="export-agents">Export CSV</button></div>
 
   <div class="patterns">
