@@ -12,18 +12,24 @@
 .PARAMETER RedirectUri
   The URL where EntraCompass is hosted. Default: https://entracompass.aboutcloud.io
 
+.PARAMETER IncludeOptional
+  Also add the optional read-only permissions used by the AI agents and Purview views:
+  AgentIdentity.Read.All, IdentityRiskyAgent.Read.All, InformationProtectionPolicy.Read.
+  Permissions that do not exist yet in your tenant's Graph are skipped with a warning.
+
 .PARAMETER GrantAdminConsent
   Grant admin consent for the delegated permissions (requires Global Administrator or
   Privileged Role Administrator).
 
 .EXAMPLE
-  ./New-EntraCompassApp.ps1 -GrantAdminConsent
+  ./New-EntraCompassApp.ps1 -GrantAdminConsent -IncludeOptional
 #>
 [CmdletBinding()]
 param(
   [string]$RedirectUri = 'https://entracompass.aboutcloud.io',
   [string]$DisplayName = 'EntraCompass',
-  [switch]$GrantAdminConsent
+  [switch]$GrantAdminConsent,
+  [switch]$IncludeOptional
 )
 
 $ErrorActionPreference = 'Stop'
@@ -39,13 +45,22 @@ Connect-MgGraph -Scopes $scopes -NoWelcome
 
 $graphAppId = '00000003-0000-0000-c000-000000000000'
 $graphSp = Get-MgServicePrincipal -Filter "appId eq '$graphAppId'"
-$wanted = 'User.Read', 'Policy.Read.All', 'Application.Read.All', 'Directory.Read.All', 'AuditLog.Read.All'
+$wanted = @('User.Read', 'Policy.Read.All', 'Application.Read.All', 'Directory.Read.All', 'AuditLog.Read.All')
+$optional = @('AgentIdentity.Read.All', 'IdentityRiskyAgent.Read.All', 'InformationProtectionPolicy.Read')
 
 # Resolve permission IDs from the tenant's own Graph service principal (no hardcoded GUIDs).
 $access = foreach ($name in $wanted) {
   $scope = $graphSp.Oauth2PermissionScopes | Where-Object Value -eq $name
   if (-not $scope) { throw "Delegated permission $name not found on Microsoft Graph." }
   @{ Id = $scope.Id; Type = 'Scope' }
+}
+if ($IncludeOptional) {
+  foreach ($name in $optional) {
+    $scope = $graphSp.Oauth2PermissionScopes | Where-Object Value -eq $name
+    if (-not $scope) { Write-Warning "Optional permission $name is not available in this tenant; skipped."; continue }
+    $access += @{ Id = $scope.Id; Type = 'Scope' }
+    $wanted += $name
+  }
 }
 
 $app = New-MgApplication -DisplayName $DisplayName -SignInAudience 'AzureADMyOrg' `

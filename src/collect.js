@@ -9,6 +9,7 @@
 // UI can say exactly what was and wasn't analysed.
 
 import { pool, reasonFor } from './graph.js';
+import { PERMISSION_RESOURCES } from './knowledge.js';
 
 const SP_SELECT = [
   'id', 'appId', 'displayName', 'appOwnerOrganizationId', 'servicePrincipalType',
@@ -26,14 +27,17 @@ export async function collectTenantData(graph, progress = () => {}) {
   const sources = {};
   const data = {};
 
-  async function source(key, label, fn, fallback) {
+  // `optional` sources need an extra permission or licence (Agent ID, ID
+  // Protection, Purview). When they fail, the UI explains how to enable them
+  // instead of warning that the scan is incomplete.
+  async function source(key, label, fn, fallback, optional = false) {
     try {
       data[key] = await fn();
-      sources[key] = { label, ok: true };
+      sources[key] = { label, ok: true, optional };
     } catch (err) {
       console.warn(`[collect] ${label} failed`, err);
       data[key] = fallback;
-      sources[key] = { label, ok: false, reason: reasonFor(err), status: err?.httpStatus };
+      sources[key] = { label, ok: false, optional, reason: reasonFor(err), status: err?.httpStatus };
     }
   }
 
@@ -84,7 +88,62 @@ export async function collectTenantData(graph, progress = () => {}) {
   // Beta report, needs AuditLog.Read.All and Entra ID P1. Optional: when it
   // fails the analysis still runs, just without "last used" dates.
   await source('spSignIns', 'Application sign-in activity', () =>
-    graph.getAll('/reports/servicePrincipalSignInActivities?$top=999', { beta: true }), []);
+    graph.getAll('/reports/servicePrincipalSignInActivities?$top=999', { beta: true }), [], true);
+
+  // ---- Agents (Microsoft Entra Agent ID, beta). Optional: needs
+  // AgentIdentity.Read.All (or an Agent ID role); falls back to service
+  // principals of type ServiceIdentity from the list above.
+  progress('Reading agent identities...');
+  const AGENT_SELECT = 'id,displayName,agentIdentityBlueprintId,accountEnabled,createdDateTime,createdByAppId,servicePrincipalType,tags,disabledByMicrosoftStatus';
+  await source('agentIdentities', 'Agent identities (Entra Agent ID)', async () => {
+    try {
+      return await graph.getAll(`/servicePrincipals/microsoft.graph.agentIdentity?$select=${AGENT_SELECT}&$expand=sponsors($select=id,displayName)&$top=100`, { beta: true });
+    } catch (e) {
+      if (e?.httpStatus !== 400) throw e;
+      return graph.getAll(`/servicePrincipals/microsoft.graph.agentIdentity?$select=${AGENT_SELECT}&$top=100`, { beta: true });
+    }
+  }, [], true);
+  await source('agentBlueprints', 'Agent identity blueprints', () =>
+    graph.getAll('/servicePrincipals/microsoft.graph.agentIdentityBlueprintPrincipal?$select=id,appId,displayName,appOwnerOrganizationId,accountEnabled,createdDateTime,verifiedPublisher&$top=100', { beta: true }), [], true);
+  await source('agentUsers', 'Agent user accounts', () =>
+    graph.getAll('/users/microsoft.graph.agentUser?$select=id,displayName,userPrincipalName,accountEnabled,identityParentId,createdDateTime&$top=999', { beta: true }), [], true);
+  await source('riskyAgents', 'Risky agents (ID Protection)', () =>
+    graph.getAll('/identityProtection/riskyAgents', { beta: true }), [], true);
+
+  // ---- Application permissions granted to apps and agents, read in bulk
+  // from the resource side (one paged call per resource API).
+  progress('Reading application permissions...');
+  await source('appRoleGrants', 'Application permissions', async () => {
+    const out = [];
+    for (const [resourceAppId, resourceName] of Object.entries(PERMISSION_RESOURCES)) {
+      let res;
+      try {
+        res = await graph.get(`/servicePrincipals(appId='${resourceAppId}')?$select=id,appId,appRoles`);
+      } catch (e) {
+        if (e?.httpStatus === 404) continue;
+        throw e;
+      }
+      const roles = new Map((res?.appRoles || []).map((r) => [r.id, r.value]));
+      const list = await graph.getAll(`/servicePrincipals/${res.id}/appRoleAssignedTo?$top=999`);
+      for (const a of list) {
+        if (a.principalType !== 'ServicePrincipal') continue;
+        out.push({ principalId: a.principalId, principalName: a.principalDisplayName, resource: resourceName, permission: roles.get(a.appRoleId) || a.appRoleId });
+      }
+    }
+    return out;
+  }, []);
+
+  await source('delegatedGrants', 'Delegated permission grants', () =>
+    graph.getAll('/oauth2PermissionGrants?$top=999'), []);
+
+  await source('roleAssignments', 'Directory role assignments', () =>
+    graph.getAll('/roleManagement/directory/roleAssignments?$select=id,principalId,roleDefinitionId,directoryScopeId'), []);
+
+  // ---- Purview: sensitivity labels available to the signed-in admin.
+  // Needs InformationProtectionPolicy.Read (delegated, no admin consent).
+  progress('Reading sensitivity labels...');
+  await source('sensitivityLabels', 'Sensitivity labels (Purview)', () =>
+    graph.getAll('/me/security/informationProtection/sensitivityLabels', { beta: true }), [], true);
 
   progress('Counting users...');
   const countHeaders = { ConsistencyLevel: 'eventual' };
@@ -130,7 +189,9 @@ export async function collectTenantData(graph, progress = () => {}) {
   return { ...data, sources, scannedAt: new Date().toISOString() };
 }
 
-const SPECIAL_USER_VALUES = new Set(['All', 'None', 'GuestsOrExternalUsers']);
+// Only object IDs go to getByIds: special values ('All', 'None',
+// 'GuestsOrExternalUsers', preview agent values...) would fail the whole call.
+const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function collectDirectoryRefs(policies = []) {
   const userIds = new Set();
@@ -139,12 +200,13 @@ export function collectDirectoryRefs(policies = []) {
   for (const p of policies) {
     const u = p?.conditions?.users || {};
     for (const id of [...(u.includeUsers || []), ...(u.excludeUsers || [])]) {
-      if (!SPECIAL_USER_VALUES.has(id)) userIds.add(id);
+      if (GUID.test(id)) userIds.add(id);
     }
-    for (const id of [...(u.includeGroups || []), ...(u.excludeGroups || [])]) groupIds.add(id);
+    for (const id of [...(u.includeGroups || []), ...(u.excludeGroups || [])]) if (GUID.test(id)) groupIds.add(id);
     const c = p?.conditions?.clientApplications || {};
-    for (const id of [...(c.includeServicePrincipals || []), ...(c.excludeServicePrincipals || [])]) {
-      if (id !== 'All' && id !== 'ServicePrincipalsInMyTenant') spIds.add(id);
+    for (const id of [...(c.includeServicePrincipals || []), ...(c.excludeServicePrincipals || []),
+      ...(c.includeAgentIdServicePrincipals || []), ...(c.excludeAgentIdServicePrincipals || [])]) {
+      if (GUID.test(id)) spIds.add(id);
     }
   }
   return { userIds, groupIds, spIds };

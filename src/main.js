@@ -4,7 +4,8 @@ import { collectTenantData } from './collect.js';
 import { analyze, AREAS, plural } from './analyzer.js';
 import { evaluate } from './whatif.js';
 import { buildReportHtml } from './report.js';
-import { fixture as demoData } from './demo-data.js';
+import { fixture as demoData, purviewExport as demoPurview } from './demo-data.js';
+import { parsePurviewExport, LOCATIONS, CORE_LOCATIONS } from './purview.js';
 import { DOCS, PRIVILEGED_ROLES } from './knowledge.js';
 import { esc, fmtDate, toCsv, download, stamp } from './util.js';
 
@@ -20,7 +21,9 @@ const KEYS = {
   raw: 'entracompass_raw',
   crown: 'entracompass_crown',
   demo: 'entracompass_demo',
+  purview: 'entracompass_purview',
 };
+const THEME_KEY = 'entracompass_theme';
 const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const state = {
@@ -37,6 +40,10 @@ const state = {
   excKind: 'all',
   excQuery: '',
   findingArea: 'all',
+  findingSev: 'all',
+  findingQuery: '',
+  agentFilter: 'all',
+  purview: null,
   whatIf: null,
   chat: [],
 };
@@ -110,6 +117,7 @@ async function signIn(cfg) {
 async function signOut() {
   const account = state.msal?.getActiveAccount();
   for (const k of Object.values(KEYS)) ss.del(k);
+  state.purview = null;
   if (state.msal && account) {
     await state.msal.logoutRedirect({ account });
   } else {
@@ -147,6 +155,10 @@ function loadDemo() {
   state.demo = true;
   ss.set(KEYS.demo, true);
   state.raw = demoData;
+  if (!ss.get(KEYS.purview)) {
+    state.purview = parsePurviewExport(JSON.stringify(demoPurview), { fileName: 'contoso-purview-export.json' });
+    ss.set(KEYS.purview, state.purview);
+  }
   if (!ss.get(KEYS.crown)) {
     state.crown = new Set([demoData.servicePrincipals[0].appId]);
     saveCrown();
@@ -193,31 +205,105 @@ function importCrown(file) {
 }
 
 // ---------------------------------------------------------------------------
+// Purview export (parsed in the browser, kept in sessionStorage only)
+// ---------------------------------------------------------------------------
+
+function importPurview(file) {
+  if (file.size > 5 * 1024 * 1024) { toast('That file is larger than 5 MB.'); return; }
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      state.purview = parsePurviewExport(String(reader.result), { fileName: file.name });
+      if (!ss.set(KEYS.purview, state.purview)) console.warn('Purview export kept in memory only.');
+      recompute();
+      render();
+      const p = state.purview;
+      toast(`Loaded ${plural(p.dlpPolicies.length, 'DLP policy', 'DLP policies')} and ${plural(p.labels.length, 'label')}.`);
+    } catch (err) {
+      toast(err.message || 'That file could not be read.');
+    }
+  };
+  reader.readAsText(file);
+}
+
+function clearPurview() {
+  state.purview = null;
+  ss.del(KEYS.purview);
+  recompute();
+  render();
+  toast('Purview export removed from this tab.');
+}
+
+// ---------------------------------------------------------------------------
+// Theme (sessionStorage only)
+// ---------------------------------------------------------------------------
+
+function currentTheme() {
+  const set = document.documentElement.dataset.theme;
+  if (set) return set;
+  return window.matchMedia?.('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+}
+
+function toggleTheme() {
+  const next = currentTheme() === 'dark' ? 'light' : 'dark';
+  document.documentElement.dataset.theme = next;
+  ss.set(THEME_KEY, next);
+  paintThemeButtons();
+}
+
+function paintThemeButtons() {
+  const dark = currentTheme() === 'dark';
+  document.querySelectorAll('.theme-toggle').forEach((b) => {
+    b.innerHTML = dark ? ICON.sun : ICON.moon;
+    b.setAttribute('aria-label', dark ? 'Switch to light theme' : 'Switch to dark theme');
+    b.title = dark ? 'Light theme' : 'Dark theme';
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Dashboard
 // ---------------------------------------------------------------------------
 
-const TABS = [
-  ['overview', 'Overview'],
-  ['apps', 'Applications'],
-  ['exceptions', 'Exceptions'],
-  ['policies', 'Policies'],
-  ['locations', 'Named locations'],
-  ['workload', 'Workload identities'],
-  ['dlp', 'Data protection'],
-  ['whatif', 'What-if'],
-  ['report', 'Executive report'],
-  ['ai', 'Ask AI'],
+// Small inline icons (stroke = currentColor), no external assets.
+const svg = (d) => `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+const ICON = {
+  overview: svg('<path d="M3 13h8V3H3zM13 21h8V11h-8zM3 21h8v-6H3zM13 3v6h8V3z"/>'),
+  apps: svg('<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>'),
+  exceptions: svg('<path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/>'),
+  policies: svg('<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>'),
+  locations: svg('<path d="M12 21s-7-6.2-7-11a7 7 0 1 1 14 0c0 4.8-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/>'),
+  workload: svg('<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.8-3.8a6 6 0 0 1-7.9 7.9l-6.9 6.9a2.1 2.1 0 0 1-3-3l6.9-6.9a6 6 0 0 1 7.9-7.9z"/>'),
+  agents: svg('<rect x="4" y="8" width="16" height="12" rx="3"/><path d="M12 8V4M8 4h8"/><circle cx="9" cy="14" r="1.2"/><circle cx="15" cy="14" r="1.2"/>'),
+  dlp: svg('<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>'),
+  purview: svg('<path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/>'),
+  whatif: svg('<path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3M12 17h.01"/><circle cx="12" cy="12" r="10"/>'),
+  report: svg('<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h5"/>'),
+  ai: svg('<path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9z"/>'),
+  sun: svg('<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>'),
+  moon: svg('<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>'),
+  arrow: svg('<path d="M5 12h14M13 6l6 6-6 6"/>'),
+};
+
+const NAV = [
+  [null, [['overview', 'Overview']]],
+  ['Access', [['apps', 'Applications'], ['exceptions', 'Exceptions'], ['policies', 'Policies'], ['locations', 'Named locations']]],
+  ['Identities', [['workload', 'Workload identities'], ['agents', 'AI agents']]],
+  ['Data', [['dlp', 'Data protection'], ['purview', 'Purview']]],
+  ['Act', [['whatif', 'What-if'], ['report', 'Executive report'], ['ai', 'Ask AI']]],
 ];
+const TAB_IDS = NAV.flatMap(([, items]) => items.map(([id]) => id));
 
 function recompute() {
   state.results = analyze(state.raw, {
     crownJewels: [...state.crown],
     now: state.demo ? state.raw.scannedAt : undefined,
+    purview: state.purview,
   });
 }
 
 function openDashboard() {
   state.crown = new Set(ss.get(KEYS.crown) || [...state.crown]);
+  state.purview = ss.get(KEYS.purview) || state.purview;
   recompute();
   $('tenant-name').textContent = state.results.summary.tenantName;
   $('demo-chip').classList.toggle('hidden', !state.demo);
@@ -227,21 +313,39 @@ function openDashboard() {
 }
 
 function render() {
-  $('tabs').innerHTML = TABS.map(([id, label]) =>
-    `<button role="tab" class="tab ${state.tab === id ? 'active' : ''}" aria-selected="${state.tab === id}" data-tab="${id}">${label}${tabBadge(id)}</button>`).join('');
-  const views = { overview: viewOverview, apps: viewApps, exceptions: viewExceptions, policies: viewPolicies, locations: viewLocations, workload: viewWorkload, dlp: viewDlp, whatif: viewWhatIf, report: viewReport, ai: viewAi };
+  if (!TAB_IDS.includes(state.tab)) state.tab = 'overview';
+  $('tabs').innerHTML = NAV.map(([group, items]) => `
+    <div class="nav-group">${group ? `<div class="nav-label">${group}</div>` : ''}
+      ${items.map(([id, label]) => `<button class="nav-item ${state.tab === id ? 'active' : ''}" ${state.tab === id ? 'aria-current="page"' : ''} data-tab="${id}">${ICON[id]}<span>${label}</span>${tabBadge(id)}</button>`).join('')}
+    </div>`).join('');
+  const views = { overview: viewOverview, apps: viewApps, exceptions: viewExceptions, policies: viewPolicies, locations: viewLocations, workload: viewWorkload, agents: viewAgents, dlp: viewDlp, purview: viewPurview, whatif: viewWhatIf, report: viewReport, ai: viewAi };
   $('view').innerHTML = views[state.tab]();
   if (state.tab === 'whatif') runWhatIf();
   if (state.tab === 'ai') renderChat();
+  paintThemeButtons();
 }
 
 function tabBadge(id) {
   const r = state.results;
+  const sevCount = (area) => r.findings.filter((f) => f.area === area && (f.severity === 'critical' || f.severity === 'high')).length;
   const n = {
     exceptions: r.summary.exclusions.gap || 0,
     apps: r.summary.apps.unprotected,
+    agents: sevCount('agents'),
+    workload: sevCount('workload'),
+    purview: r.findings.filter((f) => f.purview && (f.severity === 'critical' || f.severity === 'high')).length,
   }[id];
-  return n ? ` <span class="tab-badge">${n}</span>` : '';
+  if (id === 'purview' && !r.purview.imported) return ' <span class="nav-badge muted-badge" title="Load a Purview export">+</span>';
+  return n ? ` <span class="nav-badge">${n}</span>` : '';
+}
+
+function goTo(tab) {
+  state.tab = tab;
+  render();
+  window.scrollTo(0, 0);
+  $('view').focus({ preventScroll: true });
+  // On narrow screens the navigation is a horizontal strip: keep the active item visible.
+  document.querySelector('.nav-item.active')?.scrollIntoView({ block: 'nearest', inline: 'center' });
 }
 
 // ---------------------------------------------------------------------------
@@ -250,7 +354,7 @@ function tabBadge(id) {
 
 const SEV_LABEL = { critical: 'Critical', high: 'High', medium: 'Medium', low: 'Low', info: 'Info' };
 const sev = (s) => `<span class="sev sev-${s}">${SEV_LABEL[s] || s}</span>`;
-const CTRL = { present: ['In place', 'good'], partial: ['Partial', 'warn'], missing: ['Missing', 'danger'], info: ['Info', 'info'] };
+const CTRL = { present: ['In place', 'good'], partial: ['Partial', 'warn'], missing: ['Missing', 'danger'], info: ['n/a', 'muted'], unknown: ['Needs export', 'muted'] };
 const ctrl = (s) => `<span class="pill pill-${CTRL[s]?.[1] || 'info'}">${CTRL[s]?.[0] || s}</span>`;
 const VERDICT = { gap: ['Opens a gap', 'danger'], review: ['Review', 'warn'], cleanup: ['Likely removable', 'info'], stale: ['Deleted object', 'muted'], justified: ['Justified', 'good'] };
 const verdict = (v) => `<span class="pill pill-${VERDICT[v][1]}">${VERDICT[v][0]}</span>`;
@@ -261,7 +365,7 @@ const learn = (url) => (url ? `<a href="${esc(url)}" target="_blank" rel="noopen
 
 function findingCard(f) {
   return `<details class="finding sev-border-${f.severity}">
-    <summary>${sev(f.severity)} <span class="area-tag">${esc(AREAS[f.area]?.label || f.area)}</span>${f.business ? '<span class="area-tag biz">Business impact</span>' : ''}<span class="finding-title">${esc(f.title)}</span></summary>
+    <summary>${sev(f.severity)}<span class="finding-title">${esc(f.title)}</span><span class="finding-tags"><span class="area-tag">${esc(AREAS[f.area]?.label || f.area)}</span>${f.purview ? '<span class="area-tag">Purview</span>' : ''}${f.business ? '<span class="area-tag biz">Business impact</span>' : ''}</span></summary>
     <div class="finding-body">
       ${f.detail ? `<p class="muted">${esc(f.detail)}</p>` : ''}
       ${f.impact ? `<p><b>Why it matters:</b> ${esc(f.impact)}</p>` : ''}
@@ -272,7 +376,7 @@ function findingCard(f) {
 }
 
 function sourceWarnings() {
-  const failed = Object.values(state.results.sources || {}).filter((s) => s && s.ok === false);
+  const failed = Object.values(state.results.sources || {}).filter((s) => s && s.ok === false && !s.optional);
   if (!failed.length) return '';
   const why = { permission_denied: 'permission denied', not_available: 'not available (licence or preview)', throttled: 'throttled', service_error: 'service error', network_error: 'network error' };
   return `<div class="alert alert-warn"><b>Partial data.</b> These sources could not be read, so related checks are incomplete:
@@ -292,50 +396,110 @@ function ring(score, tone) {
 // Views
 // ---------------------------------------------------------------------------
 
+const AREA_TAB = { access: 'policies', exceptions: 'exceptions', dlp: 'dlp', workload: 'workload', agents: 'agents', locations: 'locations', crown: 'apps' };
+
 function viewOverview() {
   const r = state.results;
   const s = r.summary;
   const sc = r.scores;
   const w = s.workforceOutsideMfa;
+  const at = r.agents.totals;
   const dlpIn = r.dlp.controls.filter((c) => c.status === 'present').length;
-  const tiles = [
-    ['Policies enforced', `${s.policyCounts.enabled}`, `${s.policyCounts.reportOnly} report-only, ${s.policyCounts.disabled} off`],
-    ['Outside main MFA policy', w.covered ? `${w.approximate ? '≥' : ''}${(w.people || 0).toLocaleString()}` : 'All', w.covered ? (w.percent !== null ? `${w.percent}% of accounts` : 'accounts') : 'no MFA-for-everyone policy'],
-    ['Business apps without MFA', `${s.apps.unprotected}`, `of ${s.apps.business} assessed`],
-    ['Exceptions opening a gap', `${s.exclusions.gap || 0}`, `of ${s.exclusionTotal} exceptions`],
-    ['Apps with secrets', `${r.workload.totals.withSecrets}`, `${r.workload.totals.dormant} dormant`],
-    ['DLP controls in place', `${dlpIn}/${r.dlp.controls.length}`, 'identity side'],
+  const pvc = r.purview.checks.filter((c) => !['unknown', 'info'].includes(c.status));
+  const fixFirst = r.findings.filter((f) => f.severity !== 'info').slice(0, 4);
+
+  const domains = [
+    { tab: 'apps', icon: 'apps', title: 'People and apps', score: sc.areas.access.score, lines: [
+      [w.covered ? `${w.approximate ? '≥' : ''}${(w.people || 0).toLocaleString()}` : 'All', w.covered ? `outside the main MFA policy${w.percent !== null ? ` (${w.percent}%)` : ''}` : 'no MFA-for-everyone policy'],
+      [`${s.apps.unprotected}/${s.apps.business}`, 'business apps without MFA'],
+    ] },
+    { tab: 'exceptions', icon: 'exceptions', title: 'Exceptions', score: sc.areas.exceptions.score, lines: [
+      [`${s.exclusions.gap || 0}`, 'open a security gap'],
+      [`${s.exclusionTotal}`, 'exceptions in total'],
+    ] },
+    { tab: 'workload', icon: 'workload', title: 'Workload identities', score: sc.areas.workload.score, lines: [
+      [`${r.workload.totals.withSecrets}`, 'apps with client secrets'],
+      [`${r.workload.totals.highPrivilege}`, 'can change tenant security'],
+    ] },
+    { tab: 'agents', icon: 'agents', title: 'AI agents', score: sc.areas.agents.score, isNew: true, lines: r.agents.inUse ? [
+      [`${at.governed}/${at.identities}`, 'covered by an enforced policy'],
+      [`${at.atRisk + at.critical}`, 'risky or over-privileged'],
+    ] : [['0', 'agents found'], ['', 'Set up agent policies before the first agent']] },
+    { tab: 'purview', icon: 'purview', title: 'Data and Purview', score: sc.areas.dlp.score, isNew: true, lines: [
+      [`${dlpIn}/${r.dlp.controls.length}`, 'identity-side DLP controls'],
+      r.purview.imported ? [`${pvc.filter((c) => c.status === 'present').length}/${pvc.length}`, 'Purview checks passed'] : [`${r.purview.labels.length}`, 'labels found. Load a DLP export'],
+    ] },
   ];
+
   const areaFilter = state.findingArea;
-  const list = r.findings.filter((f) => areaFilter === 'all' || f.area === areaFilter);
+  const q = state.findingQuery.toLowerCase();
+  const list = r.findings.filter((f) => (areaFilter === 'all' || f.area === areaFilter) &&
+    (state.findingSev === 'all' || f.severity === state.findingSev) &&
+    (!q || `${f.title} ${f.detail}`.toLowerCase().includes(q)));
+  const sevCounts = Object.fromEntries(Object.keys(SEV_LABEL).map((k) => [k, r.findings.filter((f) => f.severity === k && (areaFilter === 'all' || f.area === areaFilter)).length]));
+  const tone = (n) => (n === null ? 'muted' : n >= 85 ? 'good' : n >= 65 ? 'warn' : 'danger');
+
   return `
-  ${state.demo ? '<div class="alert alert-info">You are viewing a fictional sample tenant (Contoso Ltd). Sign out and connect your own tenant for a real assessment.</div>' : ''}
+  ${state.demo ? '<div class="alert alert-info"><b>Sample tenant.</b> You are viewing Contoso Ltd, a fictional organisation with AI agents and a Purview export pre-loaded. Sign out and connect your own tenant for a real assessment.</div>' : ''}
   ${sourceWarnings()}
+  <div class="page-head">
+    <div>
+      <h1 class="page-title">${esc(s.tenantName)}</h1>
+      <div class="muted small">Scanned ${esc(fmtDate(s.scannedAt, true))} &middot; ${s.policyCounts.enabled} of ${s.policyCounts.total} policies enforced &middot; ${(s.users.total || 0).toLocaleString()} accounts</div>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-ghost btn-sm" data-goto="whatif">Test a change</button>
+      <button class="btn btn-primary btn-sm" data-goto="report">Executive report</button>
+    </div>
+  </div>
+
   <div class="overview-top">
     <div class="card score-card">
       ${ring(sc.overall, sc.rating.tone)}
       <div>
         <div class="score-label tone-${sc.rating.tone}">${esc(sc.rating.label)}</div>
-        <div class="muted small">Scanned ${esc(fmtDate(s.scannedAt, true))}</div>
+        <div class="muted small">Overall posture, weighted across areas</div>
         <div class="areas">${Object.entries(sc.areas).map(([k, a]) => `
-          <button class="area-row ${areaFilter === k ? 'active' : ''}" data-area="${k}">
+          <button class="area-row ${areaFilter === k ? 'active' : ''}" data-area="${k}" title="Filter findings">
             <span>${esc(a.label)}</span>
-            ${a.score === null ? '<span class="muted small">tag crown jewels</span>' : `<span class="mini-bar"><span class="tone-bg-${a.score >= 85 ? 'good' : a.score >= 65 ? 'warn' : 'danger'}" style="width:${a.score}%"></span></span><b>${a.score}</b>`}
+            ${a.score === null ? `<span class="muted small">${k === 'crown' ? 'tag crown jewels' : 'not in use'}</span><span></span>` : `<span class="mini-bar"><span class="tone-bg-${tone(a.score)}" style="width:${a.score}%"></span></span><b>${a.score}</b>`}
           </button>`).join('')}</div>
       </div>
     </div>
-    <div class="tiles">${tiles.map(([l, v, sub]) => `<div class="tile"><div class="tile-v">${esc(v)}</div><div class="tile-l">${esc(l)}</div><div class="tile-s">${esc(sub)}</div></div>`).join('')}</div>
+    <div class="card fix-card">
+      <div class="card-head"><h2 class="section-title">Fix first</h2><span class="muted small">${plural(r.findings.filter((f) => f.severity === 'critical').length, 'critical finding')}</span></div>
+      <ol class="fix-list">${fixFirst.map((f) => `
+        <li><button class="fix-item" data-goto="${AREA_TAB[f.area] || 'overview'}">
+          ${sev(f.severity)}<span class="fix-title">${esc(f.title)}</span><span class="fix-area muted small">${esc(AREAS[f.area]?.label || '')}</span>
+        </button></li>`).join('') || '<li class="muted">No significant issues found.</li>'}</ol>
+    </div>
   </div>
 
-  <h2 class="section-title">Answers for management</h2>
-  <div class="qa-grid">${r.questions.map((q) => `
-    <div class="qa qa-${q.status}"><div class="qa-q">${esc(q.q)}</div><div class="qa-a">${esc(q.a)}</div></div>`).join('')}</div>
+  <div class="domains">${domains.map((d) => `
+    <button class="domain tone-edge-${tone(d.score)}" data-goto="${d.tab}">
+      <div class="domain-head">${ICON[d.icon]}<b>${esc(d.title)}</b>${d.isNew ? '<span class="new-tag">New</span>' : ''}<span class="domain-score tone-${tone(d.score)}">${d.score === null ? '&ndash;' : d.score}</span></div>
+      ${d.lines.map(([v, l]) => `<div class="domain-line"><span class="domain-v">${esc(v)}</span> <span class="muted">${esc(l)}</span></div>`).join('')}
+      <span class="domain-go">Open ${ICON.arrow}</span>
+    </button>`).join('')}</div>
+
+  <details class="qa-wrap" open>
+    <summary><h2 class="section-title">Answers for management</h2><span class="muted small">${r.questions.filter((x) => x.status === 'good').length} of ${r.questions.length} answered "yes"</span></summary>
+    <div class="qa-grid">${r.questions.map((x) => `
+      <div class="qa qa-${x.status}"><div class="qa-q"><span class="qa-dot" aria-hidden="true"></span>${esc(x.q)}</div><div class="qa-a">${esc(x.a)}</div></div>`).join('')}</div>
+  </details>
 
   <div class="section-head">
-    <h2 class="section-title">Findings ${areaFilter !== 'all' ? `<span class="muted">in ${esc(AREAS[areaFilter].label)}</span> <button class="link-btn" data-area="all">show all</button>` : ''}</h2>
+    <h2 class="section-title">Findings <span class="muted">(${list.length})</span> ${areaFilter !== 'all' ? `<span class="muted">in ${esc(AREAS[areaFilter].label)}</span> <button class="link-btn" data-area="all">show all areas</button>` : ''}</h2>
     <button class="btn btn-ghost btn-sm" data-action="export-findings">Export CSV</button>
   </div>
-  <div class="findings">${list.map(findingCard).join('') || '<p class="muted">No findings in this area.</p>'}</div>`;
+  <div class="toolbar">
+    <div class="pills">
+      <button class="fpill ${state.findingSev === 'all' ? 'active' : ''}" data-sev="all">All</button>
+      ${Object.entries(SEV_LABEL).filter(([k]) => sevCounts[k]).map(([k, l]) => `<button class="fpill fpill-${k} ${state.findingSev === k ? 'active' : ''}" data-sev="${k}">${l} <span>${sevCounts[k]}</span></button>`).join('')}
+    </div>
+    <div class="toolbar-right"><input type="search" class="search" placeholder="Search findings" value="${esc(state.findingQuery)}" data-input="findingQuery" aria-label="Search findings" /></div>
+  </div>
+  <div class="findings">${list.map(findingCard).join('') || '<p class="muted pad">No findings match.</p>'}</div>`;
 }
 
 function filteredApps() {
@@ -351,6 +515,8 @@ function filteredApps() {
   });
 }
 
+const pageHead = (title, sub = '') => `<div class="page-head"><div><h1 class="page-title">${title}</h1>${sub ? `<p class="muted page-sub">${sub}</p>` : ''}</div></div>`;
+
 function viewApps() {
   const apps = filteredApps();
   const all = state.results.apps;
@@ -364,6 +530,7 @@ function viewApps() {
   ];
   const shown = apps.slice(0, state.appLimit);
   return `
+  ${pageHead('Applications')}
   <div class="intro">
     <p><b>Business applications</b> and the protection each one gets from Conditional Access. Mark your <b>crown jewels</b> with the star: the assessment then checks them against a higher bar (always MFA, phishing-resistant, device or session control, no exclusions).</p>
     <p class="muted small">SAML and App Proxy apps sign in through Entra, so Conditional Access applies to them. Excluding them removes control; a dedicated policy is usually the better fix.</p>
@@ -413,6 +580,7 @@ function viewExceptions() {
   const kinds = [...new Set(r.exclusions.map((e) => e.kind))];
   const counts = r.summary.exclusions;
   return `
+  ${pageHead('Exceptions')}
   <div class="intro"><p>Every exclusion across active policies, classified. <b>Opens a gap</b>: real exposure. <b>Review</b>: needs an owner and a reason on record. <b>Likely removable</b>: tied to an unused app. <b>Deleted object</b>: safe to remove. <b>Justified</b>: expected (for example emergency accounts), still keep it documented.</p></div>
   <div class="toolbar">
     <div class="pills">
@@ -449,6 +617,7 @@ function viewExceptions() {
 function viewPolicies() {
   const r = state.results;
   return `
+  ${pageHead('Policies', `${r.policies.length} Conditional Access policies: ${r.summary.policyCounts.enabled} on, ${r.summary.policyCounts.reportOnly} report-only, ${r.summary.policyCounts.disabled} off.`)}
   <h2 class="section-title">Modern baseline</h2>
   <div class="baseline">${r.baseline.map((c) => `
     <div class="base-item">${ctrl(c.status)}<div><b>${esc(c.title)}</b><div class="muted small">${esc(c.detail)}${c.policies.length ? ` <span>Policies: ${esc(c.policies.join(', '))}</span>` : ''} ${learn(c.ref)}</div></div></div>`).join('')}</div>
@@ -468,8 +637,9 @@ function viewPolicies() {
 
 function viewLocations() {
   const r = state.results;
-  if (!r.locations.length) return '<div class="card pad"><p>No named locations are defined.</p></div>';
+  if (!r.locations.length) return `${pageHead('Named locations')}<div class="card pad"><p>No named locations are defined.</p></div>`;
   return `
+  ${pageHead('Named locations')}
   <div class="intro"><p>Named locations decide where policies apply or relax. A trusted location with broad IP ranges quietly extends trust to networks you do not control. <a href="${DOCS.namedLocations}" target="_blank" rel="noopener">How named locations work</a></p></div>
   <div class="cards">${r.locations.map((l) => `
     <div class="card loc-card">
@@ -485,18 +655,20 @@ function viewWorkload() {
   const w = state.results.workload;
   const t = w.totals;
   return `
-  <div class="intro"><p>Workload identities are apps and services that sign in on their own with a secret or certificate. Conditional Access for workload identities can restrict single-tenant apps by location and risk (needs Workload Identities Premium). Managed identities need no secret and are the preferred option. <a href="${DOCS.workloadCa}" target="_blank" rel="noopener">Learn more</a></p></div>
+  ${pageHead('Workload identities')}
+  <div class="intro"><p>Workload identities are apps and services that sign in on their own with a secret or certificate. Conditional Access for workload identities can restrict single-tenant apps by location and risk (needs Workload Identities Premium). Managed identities need no secret and are the preferred option. AI agents have their own view. <a href="${DOCS.workloadCa}" target="_blank" rel="noopener">Learn more</a></p></div>
   <div class="tiles tiles-row">
-    ${[['With credentials', w.apps.length], ['Client secrets', t.withSecrets], ['Dormant (valid, unused)', t.dormant], ['Secrets > 1 year', t.longLived], ['Expiring in 30 days', t.expiringSoon], ['Managed identities', w.managedIdentities]]
+    ${[['With credentials', w.apps.length], ['Client secrets', t.withSecrets], ['Can change tenant security', t.highPrivilege], ['Dormant (valid, unused)', t.dormant], ['Secrets > 1 year', t.longLived], ['Expiring in 30 days', t.expiringSoon]]
       .map(([l, v]) => `<div class="tile"><div class="tile-v">${v}</div><div class="tile-l">${l}</div></div>`).join('')}
   </div>
   <h2 class="section-title">Workload identity policies</h2>
   ${w.policies.length ? `<ul class="plain">${w.policies.map((p) => `<li><span class="pill pill-${p.state === 'enabled' ? 'good' : 'muted'}">${esc(p.stateLabel)}</span> <b>${esc(p.name)}</b> <span class="muted">${esc(p.scope)} &middot; ${esc(p.controls)}${p.conditions.length ? ` when ${esc(p.conditions.join(', '))}` : ''}</span></li>`).join('')}</ul>` : '<p class="muted">None.</p>'}
   <div class="section-head"><h2 class="section-title">App registrations with credentials</h2><button class="btn btn-ghost btn-sm" data-action="export-workload">Export CSV</button></div>
   <div class="table-wrap"><table class="table">
-    <thead><tr><th>App</th><th>Secrets</th><th>Certificates</th><th>Expired</th><th>Expiring</th><th>Long-lived</th><th>Audience</th><th>Last used</th></tr></thead>
+    <thead><tr><th>App</th><th>High-impact permissions</th><th>Secrets</th><th>Certificates</th><th>Expired</th><th>Expiring</th><th>Long-lived</th><th>Audience</th><th>Last used</th></tr></thead>
     <tbody>${w.apps.slice(0, 500).map((a) => `<tr>
-      <td><b>${esc(a.name)}</b>${a.dormant ? ' <span class="pill pill-danger">dormant</span>' : ''}</td>
+      <td><b>${esc(a.name)}</b>${a.dormant ? ' <span class="pill pill-danger">dormant</span>' : ''}${a.agentBlueprint ? ' <span class="hint-tag">agent blueprint</span>' : ''}</td>
+      <td>${permPills(a.permissions, 3)}${a.permissions.roles.length ? ` <span class="pill pill-danger pill-sm">${esc(a.permissions.roles.join(', '))}</span>` : ''}</td>
       <td>${a.secrets}</td><td>${a.certificates}</td><td>${a.expired || ''}</td>
       <td>${a.expiringSoon ? `<span class="pill pill-warn">${a.expiringSoon}</span>` : ''}</td>
       <td>${a.longLivedSecrets ? `<span class="pill pill-warn">${a.longLivedSecrets}</span>` : ''}</td>
@@ -505,9 +677,174 @@ function viewWorkload() {
   </table></div>`;
 }
 
+const RISK_TONE = { high: 'danger', medium: 'warn', low: 'info' };
+const permPills = (sum, max = 4) => {
+  const items = [...sum.critical.map((x) => [x, 'danger']), ...sum.high.map((x) => [x, 'warn'])];
+  if (!items.length) return '<span class="dash">&ndash;</span>';
+  return items.slice(0, max).map(([x, t]) => `<span class="pill pill-${t} pill-sm">${esc(x)}</span>`).join(' ') + (items.length > max ? ` <span class="muted small">+${items.length - max}</span>` : '');
+};
+
+function checkList(checks) {
+  return `<div class="baseline">${checks.map((c) => `
+    <div class="base-item">${ctrl(c.status)}<div><b>${esc(c.title)}</b><div class="muted small">${esc(c.detail)} ${learn(c.ref)}</div>${c.why ? `<div class="small why">${esc(c.why)}</div>` : ''}</div></div>`).join('')}</div>`;
+}
+
+function viewAgents() {
+  const ag = state.results.agents;
+  const t = ag.totals;
+  const filters = [
+    ['all', 'All', ag.agents.length],
+    ['risk', 'Risky or over-privileged', ag.agents.filter((a) => ['critical', 'high'].includes(a.severity)).length],
+    ['ungoverned', 'Not covered', ag.agents.filter((a) => !a.governed).length],
+    ['nosponsor', 'No sponsor', ag.agents.filter((a) => a.sponsors === 0).length],
+    ['thirdparty', 'Third party', ag.agents.filter((a) => a.publisher === 'Third party').length],
+  ];
+  const f = state.agentFilter;
+  const list = ag.agents.filter((a) => f === 'all' || (f === 'risk' && ['critical', 'high'].includes(a.severity)) || (f === 'ungoverned' && !a.governed) || (f === 'nosponsor' && a.sponsors === 0) || (f === 'thirdparty' && a.publisher === 'Third party'));
+  return `
+  <div class="page-head"><div><h1 class="page-title">AI agents <span class="new-tag">New</span></h1>
+    <p class="muted page-sub">Microsoft Entra Agent ID gives AI agents their own identities. Conditional Access treats them differently from people: you secure each <b>access pattern</b> separately.</p></div>
+    <button class="btn btn-ghost btn-sm" data-action="export-agents">Export CSV</button></div>
+
+  <div class="patterns">
+    <div class="pattern"><div class="pattern-k">On behalf of a user</div><p>The agent uses the signed-in user's token. <b>User policies apply</b> (MFA, device, location).</p></div>
+    <div class="pattern"><div class="pattern-k">Autonomous (agent identity)</div><p>The agent acts on its own. Only <b>agent policies</b> apply, and the only control is block (by approval list or agent risk).</p></div>
+    <div class="pattern"><div class="pattern-k">Agent user account</div><p>An agent with a mailbox and Teams presence. <b>"All users" policies do not include it</b>: it needs an agent-user policy.</p></div>
+  </div>
+
+  ${ag.sourceNotes.length ? `<div class="alert alert-info">${ag.sourceNotes.map(esc).join('<br>')}</div>` : ''}
+  ${!ag.inUse ? `<div class="card pad empty"><h3>No AI agents found</h3><p class="muted">No Entra Agent ID identities, agent user accounts or AI-like apps were found. Set up the recommended agent policies in report-only now, so the first agent starts governed. ${learn(DOCS.agentCaAutonomous)}</p></div>` : `
+  <div class="tiles tiles-row">
+    ${[['Agent identities', t.identities, ''], ['Covered by an enforced policy', `${t.governed}/${t.identities}`, t.governed < t.identities ? 'warn' : 'good'], ['Org-wide permissions', t.highPrivilege, t.highPrivilege ? 'warn' : ''], ['Risky (ID Protection)', t.atRisk, t.atRisk ? 'danger' : ''], ['No sponsor', t.noSponsor, t.noSponsor ? 'warn' : ''], ['AI-like apps outside Agent ID', t.candidates, t.candidates ? 'warn' : '']]
+    .map(([l, v, tone]) => `<div class="tile ${tone ? 'tile-' + tone : ''}"><div class="tile-v">${esc(v)}</div><div class="tile-l">${esc(l)}</div></div>`).join('')}
+  </div>`}
+
+  <h2 class="section-title">Agent security baseline</h2>
+  ${checkList(ag.checks)}
+
+  <h2 class="section-title spaced">Conditional Access policies for agents</h2>
+  ${ag.policies.length ? `<div class="table-wrap"><table class="table">
+    <thead><tr><th>State</th><th>Policy</th><th>Targets</th><th>Scope</th><th>Type</th><th>Agent risk</th><th>Exclusions</th></tr></thead>
+    <tbody>${ag.policies.map((p) => `<tr>
+      <td><span class="pill pill-${p.state === 'enabled' ? 'good' : p.state === 'disabled' ? 'muted' : 'warn'}">${esc(p.stateLabel)}</span></td>
+      <td><b>${esc(p.name)}</b></td><td>${esc(p.target)}</td><td>${esc(p.scope)}</td><td>${esc(p.kind)}</td>
+      <td>${p.risk.length ? esc(p.risk.join(', ')) : '<span class="dash">&ndash;</span>'}</td>
+      <td>${p.exclusions ? `<button class="link-btn" data-exc-policy="${esc(p.name)}">${p.exclusions}</button>` : '0'}</td></tr>`).join('')}</tbody>
+  </table></div>` : `<div class="card pad"><p>No Conditional Access policy targets agents. Microsoft recommends, in report-only first: <b>block high-risk agent identities</b>, and <b>block all agents except approved ones</b>. ${learn(DOCS.agentCaAutonomous)}</p></div>`}
+
+  ${ag.agents.length ? `
+  <div class="section-head"><h2 class="section-title">Agent identities (${ag.agents.length})</h2></div>
+  <div class="toolbar"><div class="pills">${filters.map(([id, l, n]) => `<button class="fpill ${f === id ? 'active' : ''}" data-agent-filter="${id}">${l} <span>${n}</span></button>`).join('')}</div></div>
+  <div class="rows">
+    <div class="row-head agent-grid"><span>Agent</span><span>Blueprint / publisher</span><span>Sponsor</span><span>Risk</span><span>Permissions</span><span>Conditional Access</span></div>
+    ${list.map((a) => `
+    <details class="row">
+      <summary class="agent-grid">
+        <span class="app-name">${a.severity !== 'none' ? sev(a.severity) + ' ' : ''}${esc(a.name)}${a.enabled ? '' : ' <span class="hint-tag">disabled</span>'}${a.agentUsers.length ? ' <span class="hint-tag">has user account</span>' : ''}</span>
+        <span class="muted">${esc(a.blueprintName || 'Unknown')}<div class="small">${esc(a.publisher)}${a.publisher === 'Third party' && !a.verifiedPublisher ? ', unverified' : ''}</div></span>
+        <span>${a.sponsors === null ? '<span class="muted small">unknown</span>' : a.sponsors ? esc(a.sponsorNames.join(', ') || a.sponsors) : '<span class="pill pill-warn">None</span>'}</span>
+        <span>${a.risk ? `<span class="pill pill-${RISK_TONE[a.risk.level] || 'muted'}">${esc(a.risk.level)}</span>` : '<span class="dash">&ndash;</span>'}</span>
+        <span>${permPills(a.permissionSummary, 2)}${a.roles.some((r) => r.privileged) ? ' <span class="pill pill-danger pill-sm">admin role</span>' : ''}</span>
+        <span>${a.governed ? '<span class="pill pill-good">Enforced</span>' : a.coveredBy.length ? '<span class="pill pill-warn">Report-only</span>' : '<span class="pill pill-danger">None</span>'}</span>
+      </summary>
+      <div class="row-body">
+        ${a.issues.length ? `<ul class="issues">${a.issues.map((i) => `<li>${sev(i.severity)} ${esc(i.text)}</li>`).join('')}</ul>` : '<p class="tone-good small">No issues found.</p>'}
+        <div class="two-col">
+          <div><h4>Application permissions</h4>${a.appPermissions.length ? `<ul>${a.appPermissions.map((x) => `<li><span class="pill pill-${x.tier === 'critical' ? 'danger' : x.tier === 'high' ? 'warn' : 'muted'} pill-sm">${esc(x.tier)}</span> ${esc(x.permission)} <span class="muted small">${esc(x.resource)}${x.inherited ? ', inherited from blueprint' : ''}</span></li>`).join('')}</ul>` : '<p class="muted">None.</p>'}
+            ${a.delegated.length ? `<h4>Delegated consent</h4><ul>${a.delegated.map((d) => `<li>${d.allUsers ? '<b>All users</b>' : 'Some users'}: <span class="mono small">${esc(d.scopes.join(' '))}</span></li>`).join('')}</ul>` : ''}
+            ${a.roles.length ? `<h4>Directory roles</h4><ul>${a.roles.map((r) => `<li>${esc(r.name)}${r.privileged ? ' <span class="pill pill-danger pill-sm">privileged</span>' : ''}</li>`).join('')}</ul>` : ''}</div>
+          <div><h4>Conditional Access</h4>${a.coveredBy.length ? `<ul>${a.coveredBy.map((c) => `<li>${esc(c.name)} <span class="muted">(${esc(STATE_TXT[c.state] || c.state)}${c.risk.length ? `, agent risk ${esc(c.risk.join('/'))}` : ''})</span></li>`).join('')}</ul>` : '<p class="muted">No agent policy covers this agent.</p>'}
+            ${a.excludedBy.length ? `<h4>Excluded from</h4><ul>${a.excludedBy.map((e) => `<li>${esc(e.name)} ${e.allowList ? '<span class="pill pill-good pill-sm">approved (allow-list)</span>' : '<span class="pill pill-danger pill-sm">gap</span>'}</li>`).join('')}</ul>` : ''}
+            ${a.agentUsers.length ? `<h4>Agent user account</h4><ul>${a.agentUsers.map((u) => `<li>${esc(u.upn || u.name)}</li>`).join('')}</ul>` : ''}
+            <div class="muted small">Object ID ${esc(a.id)}${a.created ? ` &middot; created ${esc(fmtDate(a.created))}` : ''}</div>
+            <button class="btn btn-ghost btn-sm" data-whatif-agent="${esc(a.id)}">Test in what-if</button></div>
+        </div>
+      </div>
+    </details>`).join('') || '<p class="muted pad">No agents match.</p>'}
+  </div>` : ''}
+
+  ${ag.users.length ? `<h2 class="section-title spaced">Agent user accounts (${ag.users.length})</h2>
+  <div class="table-wrap"><table class="table"><thead><tr><th>Account</th><th>Agent</th><th>Covered by</th></tr></thead>
+  <tbody>${ag.users.map((u) => `<tr><td><b>${esc(u.name)}</b><div class="muted small">${esc(u.upn || '')}</div></td><td>${esc(u.parentName || 'Unknown')}</td>
+    <td>${u.coveredBy.length ? u.coveredBy.map((c) => `${esc(c.name)} <span class="muted">(${esc(STATE_TXT[c.state])})</span>`).join(', ') : '<span class="pill pill-danger">No policy</span> <span class="muted small">"All users" policies do not apply</span>'}</td></tr>`).join('')}</tbody></table></div>` : ''}
+
+  ${ag.candidates.length ? `<h2 class="section-title spaced">AI-like apps outside Agent ID (${ag.candidates.length})</h2>
+  <p class="muted small">Apps whose names suggest an AI agent or assistant, registered as ordinary apps. Agent policies, agent risk and sponsors do not apply to them. Name-based suggestion: confirm with the owner.</p>
+  <div class="table-wrap"><table class="table"><thead><tr><th>App</th><th>Publisher</th><th>Application permissions</th><th>Tenant-wide delegated</th><th>Secrets</th></tr></thead>
+  <tbody>${ag.candidates.map((c) => `<tr><td><b>${esc(c.name)}</b></td><td class="muted">${esc(c.publisher)}</td><td>${permPills(c.permissionSummary)}</td>
+    <td>${c.broadDelegated.length ? c.broadDelegated.map((x) => `<span class="pill pill-warn pill-sm">${esc(x)}</span>`).join(' ') : '<span class="dash">&ndash;</span>'}</td><td>${c.secrets || ''}</td></tr>`).join('')}</tbody></table></div>` : ''}
+
+  ${ag.blueprints.length ? `<h2 class="section-title spaced">Agent blueprints (${ag.blueprints.length})</h2>
+  <div class="table-wrap"><table class="table"><thead><tr><th>Blueprint</th><th>Publisher</th><th>Agents</th><th>Permissions (inherited by every agent)</th></tr></thead>
+  <tbody>${ag.blueprints.map((b) => `<tr><td><b>${esc(b.name)}</b></td><td class="muted">${esc(b.publisher)}${b.publisher === 'Third party' && !b.verifiedPublisher ? ', unverified' : ''}</td><td>${b.agents}</td><td>${permPills(b.permissionSummary)}</td></tr>`).join('')}</tbody></table></div>` : ''}
+  <p class="small spaced">${learn(DOCS.agentCa)}</p>`;
+}
+
+const STATE_TXT = { enabled: 'on', enabledForReportingButNotEnforced: 'report-only', disabled: 'off' };
+
+function viewPurview() {
+  const pv = state.results.purview;
+  const covRows = Object.entries(LOCATIONS);
+  return `
+  <div class="page-head"><div><h1 class="page-title">Purview <span class="new-tag">New</span></h1>
+    <p class="muted page-sub">Sensitivity labels and DLP decide what may happen to data. Conditional Access decides who reaches it and from which device. This view checks that the two fit together, including Microsoft 365 Copilot and agents.</p></div></div>
+
+  <div class="card import-card ${pv.imported ? 'loaded' : ''}" data-drop="purview">
+    <div class="import-main">
+      <div>
+        <h3>${pv.imported ? 'Purview export loaded' : 'Load a Purview export'}</h3>
+        ${pv.imported
+          ? `<p class="muted small">${esc(pv.imported.fileName || 'export')} ${pv.imported.exportedAt ? `&middot; exported ${esc(fmtDate(pv.imported.exportedAt, true))}` : ''} &middot; ${plural(pv.totals.dlpPolicies, 'DLP policy', 'DLP policies')}, ${plural(pv.totals.labels, 'label')}. Parsed in this browser tab, never uploaded.</p>`
+          : '<p class="muted small">DLP policies are not readable through Microsoft Graph. Run the export script in PowerShell (read-only, Security &amp; Compliance PowerShell), then drop the JSON file here. It is parsed in this browser tab and never uploaded.</p>'}
+      </div>
+      <div class="btn-row">
+        <label class="btn ${pv.imported ? 'btn-ghost' : 'btn-primary'} btn-sm file-btn">${pv.imported ? 'Replace file' : 'Choose JSON file'}<input type="file" accept="application/json,.json" data-action="import-purview" hidden /></label>
+        ${pv.imported ? '<button class="btn btn-ghost btn-sm" data-action="clear-purview">Remove</button>' : ''}
+      </div>
+    </div>
+    <details class="howto"><summary>How to create the export</summary>
+      <pre class="code">./Export-PurviewForEntraCompass.ps1 -OutFile purview.json</pre>
+      <p class="muted small">The script is in the <a href="https://github.com/arusso-aboutcloud/EntraCompass/blob/main/infra/Export-PurviewForEntraCompass.ps1" target="_blank" rel="noopener">GitHub repo</a>. It needs the ExchangeOnlineManagement module and a Compliance Administrator, Compliance Data Administrator or Global Reader account. It reads DLP policies and rules, sensitivity labels and label policies, and writes names, modes, locations and rule actions only: no content and no matched data.</p>
+    </details>
+  </div>
+
+  <h2 class="section-title spaced">Purview and Conditional Access checks</h2>
+  ${checkList(pv.checks)}
+
+  ${pv.imported ? `
+  <h2 class="section-title spaced">DLP coverage by location</h2>
+  <div class="coverage">${covRows.map(([k, label]) => {
+    const c = pv.coverage[k];
+    const status = c.enforced ? 'good' : c.test ? 'warn' : CORE_LOCATIONS.includes(k) || k === 'copilot' ? 'danger' : 'muted';
+    return `<div class="cov cov-${status}"><div class="cov-l">${esc(label)}</div><div class="cov-v">${c.enforced ? `${c.enforced} enforced` : c.test ? `${c.test} in test` : 'Not covered'}</div>${c.policies.length ? `<div class="muted small">${esc(c.policies.join(', '))}</div>` : ''}</div>`;
+  }).join('')}</div>
+
+  <h2 class="section-title spaced">DLP policies (${pv.dlpPolicies.length})</h2>
+  <div class="table-wrap"><table class="table"><thead><tr><th>Mode</th><th>Policy</th><th>Locations</th><th>Rules</th><th>Blocking rules</th><th>Changed</th></tr></thead>
+  <tbody>${pv.dlpPolicies.map((p) => `<tr><td><span class="pill pill-${p.mode === 'enforce' ? 'good' : p.mode === 'test' ? 'warn' : 'muted'}">${p.mode === 'enforce' ? 'On' : p.mode === 'test' ? 'Test' : 'Off'}</span></td>
+    <td><b>${esc(p.name)}</b></td><td class="muted">${esc(p.locations.map((l) => LOCATIONS[l]).join(', ') || 'Unknown')}</td><td>${p.rules}</td><td>${p.blockingRules}</td><td class="muted small">${esc(fmtDate(p.modified))}</td></tr>`).join('')}</tbody></table></div>` : ''}
+
+  ${pv.labels.length ? `<h2 class="section-title spaced">Sensitivity labels (${pv.labels.length}) <span class="muted small">${pv.labelsSource === 'export' ? 'from export' : 'published to you, from Graph'}</span></h2>
+  <div class="table-wrap"><table class="table"><thead><tr><th>Label</th><th>Encryption</th><th>Authentication context</th>${pv.labelsSource === 'export' ? '<th>Applies to</th>' : ''}</tr></thead>
+  <tbody>${pv.labels.map((l) => `<tr><td><b>${esc(l.name)}</b></td><td>${yes(l.encryption)}</td><td>${l.authContext ? `<span class="mono small">${esc(l.authContext)}</span>` : '<span class="dash">&ndash;</span>'}</td>${pv.labelsSource === 'export' ? `<td class="muted small">${esc(l.scope || '')}</td>` : ''}</tr>`).join('')}</tbody></table></div>` : ''}
+
+  <h2 class="section-title spaced">Checklist for the Purview DLP assessment</h2>
+  <ul class="checklist">
+    <li>Map each crown-jewel app to the sensitivity labels and DLP policies that protect its data.</li>
+    <li>For every label that uses an authentication context, confirm a Conditional Access policy enforces it.</li>
+    <li>Endpoint DLP needs onboarded devices: require compliant devices for desktop sync clients.</li>
+    <li>Personal devices: choose browser-only access (app-enforced restrictions) or Defender for Cloud Apps session policies.</li>
+    <li>Copilot and agents: add the Microsoft 365 Copilot DLP location and review agents' data permissions in the AI agents view.</li>
+    <li>Guests: confirm MFA and decide whether they may open encrypted or labelled content.</li>
+    <li>If Adaptive Protection is licensed, connect insider risk levels to a Conditional Access policy.</li>
+  </ul>
+  <p class="small">${learn(DOCS.purviewDlp)} &middot; <a href="${DOCS.dspmAi}" target="_blank" rel="noopener">Data security for AI</a></p>`;
+}
+
 function viewDlp() {
   const d = state.results.dlp;
   return `
+  ${pageHead('Data protection', 'Identity-side controls that decide where company data can be reached from.')}
   <div class="intro">
     <p><b>Identity side of DLP.</b> Purview DLP decides what can be done with sensitive data. Conditional Access decides <i>who</i> reaches it, <i>from where</i> and <i>on which device</i>. A DLP project needs both: DLP for endpoints only works on onboarded devices, and browser sessions on personal devices need session controls.</p>
     <p class="muted small">${esc(d.note)}</p>
@@ -519,15 +856,7 @@ function viewDlp() {
       <p><b>Why it matters:</b> ${esc(c.why)} ${learn(c.ref)}</p>
     </div>`).join('')}</div>
   ${d.rmsExcluded.length ? `<div class="alert alert-info"><b>Rights Management Services is excluded</b> in: ${esc(d.rmsExcluded.join(', '))}. This changes who can open encrypted, labelled content. Record it as a DLP decision.</div>` : ''}
-  <h2 class="section-title">Checklist for the Purview DLP assessment</h2>
-  <ul class="checklist">
-    <li>Map each crown-jewel app to the sensitivity labels and DLP policies that protect its data.</li>
-    <li>For every label that uses an authentication context, confirm a Conditional Access policy enforces it (see above).</li>
-    <li>Endpoint DLP needs onboarded devices: confirm a policy requires compliant devices for desktop sync clients.</li>
-    <li>Personal devices: decide between browser-only access (app-enforced restrictions) and Defender for Cloud Apps session policies.</li>
-    <li>Guests: confirm MFA and decide whether they may download labelled content.</li>
-    <li>If Adaptive Protection is licensed, connect insider risk levels to a Conditional Access policy.</li>
-  </ul>
+  <div class="card pad callout"><b>Next: Purview.</b> Sensitivity labels, DLP locations (including Copilot) and their fit with these controls are in the <button class="link-btn" data-goto="purview">Purview view</button>.</div>
   <p class="small">${learn(DOCS.purviewDlp)}</p>`;
 }
 
@@ -541,7 +870,8 @@ function defaultWhatIf() {
     userType: 'member', userId: '', groupIds: [], roleIds: [],
     appId: (apps.find((a) => a.crownJewel) || apps[0] || {}).appId || '',
     locationId: 'untrusted', platform: 'windows', clientApp: 'browser', device: 'unmanaged',
-    signInRisk: 'none', userRisk: 'none',
+    signInRisk: 'none', userRisk: 'none', authFlow: 'none', insiderRisk: 'none',
+    agentId: '', agentUserId: '', agentRisk: 'none',
   };
 }
 
@@ -556,11 +886,23 @@ function viewWhatIf() {
   for (const p of state.raw.policies || []) for (const id of [...(p.conditions?.users?.includeRoles || []), ...(p.conditions?.users?.excludeRoles || [])]) roleIds.add(id);
   const roles = [...roleIds].map((id) => ({ id, name: r.lookups.roles.find((x) => x.id === id)?.name || PRIVILEGED_ROLES[id] || 'Directory role' }));
   return `
+  ${pageHead('What-if')}
   <div class="intro"><p>Test a sign-in before you change anything. Pick who, which app, from where and on what device: EntraCompass shows which policies apply and what the user experiences, today and if report-only policies were switched on.</p>
   <p class="muted small">Simplified engine: device filters, authentication flows and insider risk are listed as "not evaluated". For a specific person, confirm with Microsoft's <a href="${DOCS.whatIf}" target="_blank" rel="noopener">What If tool</a>.</p></div>
   <div class="whatif">
     <form class="card whatif-form" id="whatif-form">
-      <label>User type<select name="userType">${opt('member', 'Member (employee)', w.userType)}${opt('guest', 'Guest / external', w.userType)}</select></label>
+      <label>Who signs in<select name="userType" data-rerender="1">${opt('member', 'Member (employee)', w.userType)}${opt('guest', 'Guest / external', w.userType)}${opt('agent', 'AI agent acting on its own', w.userType)}${opt('agentUser', 'Agent user account', w.userType)}</select></label>
+      ${w.userType === 'agent' ? `
+      <label>Agent identity<select name="agentId">${r.agents.agents.length ? r.agents.agents.map((a) => opt(a.id, `${a.name}${a.blueprintName ? ' (' + a.blueprintName + ')' : ''}`, w.agentId)).join('') : opt('', 'Any agent (none found in the tenant)', '')}</select></label>
+      <label>Resource<select name="appId">${Object.entries(byCat).map(([cat, list]) => `<optgroup label="${esc(cat)}">${list.map((a) => opt(a.appId, a.name, w.appId)).join('')}</optgroup>`).join('')}</select></label>
+      <label>Agent risk (ID Protection)<select name="agentRisk">${['none', 'low', 'medium', 'high'].map((v) => opt(v, v, w.agentRisk)).join('')}</select></label>
+      <p class="muted small">Agent identities only meet agent policies; the only control is block. Policies for users never apply.</p>
+      ` : w.userType === 'agentUser' ? `
+      <label>Agent user account<select name="agentUserId">${opt('', 'Any agent user', w.agentUserId)}${r.agents.users.map((u) => opt(u.id, u.upn || u.name, w.agentUserId)).join('')}</select></label>
+      <label>Resource<select name="appId">${Object.entries(byCat).map(([cat, list]) => `<optgroup label="${esc(cat)}">${list.map((a) => opt(a.appId, a.name, w.appId)).join('')}</optgroup>`).join('')}</select></label>
+      <label>Agent risk (ID Protection)<select name="agentRisk">${['none', 'low', 'medium', 'high'].map((v) => opt(v, v, w.agentRisk)).join('')}</select></label>
+      <p class="muted small">"All users" policies do not include agent user accounts.</p>
+      ` : `
       <label>Specific user <span class="muted small">(users named in policies)</span><select name="userId">${opt('', 'Any user', w.userId)}${r.lookups.users.map((u) => opt(u.id, `${u.name}${u.upn ? ' (' + u.upn + ')' : ''}`, w.userId)).join('')}</select></label>
       ${r.lookups.groups.length ? `<fieldset><legend>Member of</legend>${r.lookups.groups.map((g) => `<label class="check"><input type="checkbox" name="groupIds" value="${esc(g.id)}" ${w.groupIds.includes(g.id) ? 'checked' : ''}/> ${esc(g.name)}${g.size !== null ? ` <span class="muted">(${g.size})</span>` : ''}</label>`).join('')}</fieldset>` : ''}
       ${roles.length ? `<fieldset><legend>Holds role</legend>${roles.map((x) => `<label class="check"><input type="checkbox" name="roleIds" value="${esc(x.id)}" ${w.roleIds.includes(x.id) ? 'checked' : ''}/> ${esc(x.name)}</label>`).join('')}</fieldset>` : ''}
@@ -575,6 +917,10 @@ function viewWhatIf() {
         <label>Sign-in risk<select name="signInRisk">${['none', 'low', 'medium', 'high'].map((v) => opt(v, v, w.signInRisk)).join('')}</select></label>
         <label>User risk<select name="userRisk">${['none', 'low', 'medium', 'high'].map((v) => opt(v, v, w.userRisk)).join('')}</select></label>
       </div>
+      <div class="two">
+        <label>Sign-in flow<select name="authFlow">${opt('none', 'Normal sign-in', w.authFlow)}${opt('deviceCodeFlow', 'Device code', w.authFlow)}${opt('authenticationTransfer', 'Authentication transfer', w.authFlow)}</select></label>
+        <label>Insider risk<select name="insiderRisk">${['none', 'minor', 'moderate', 'elevated'].map((v) => opt(v, v, w.insiderRisk)).join('')}</select></label>
+      </div>`}
     </form>
     <div id="whatif-result" class="whatif-result"></div>
   </div>`;
@@ -584,11 +930,16 @@ function readWhatIfForm() {
   const f = $('whatif-form');
   if (!f) return;
   const fd = new FormData(f);
+  const prev = state.whatIf || defaultWhatIf();
+  const get = (k) => (fd.has(k) ? fd.get(k) : prev[k]);
   state.whatIf = {
-    userType: fd.get('userType'), userId: fd.get('userId'),
-    groupIds: fd.getAll('groupIds'), roleIds: fd.getAll('roleIds'),
-    appId: fd.get('appId'), locationId: fd.get('locationId'), platform: fd.get('platform'),
-    clientApp: fd.get('clientApp'), device: fd.get('device'), signInRisk: fd.get('signInRisk'), userRisk: fd.get('userRisk'),
+    ...prev,
+    userType: get('userType'), userId: get('userId'),
+    groupIds: fd.has('userId') ? fd.getAll('groupIds') : prev.groupIds, roleIds: fd.has('userId') ? fd.getAll('roleIds') : prev.roleIds,
+    appId: get('appId'), locationId: get('locationId'), platform: get('platform'),
+    clientApp: get('clientApp'), device: get('device'), signInRisk: get('signInRisk'), userRisk: get('userRisk'),
+    authFlow: get('authFlow'), insiderRisk: get('insiderRisk'),
+    agentId: get('agentId'), agentUserId: get('agentUserId'), agentRisk: get('agentRisk'),
   };
 }
 
@@ -596,7 +947,14 @@ function runWhatIf() {
   const out = $('whatif-result');
   if (!out) return;
   const strengthById = Object.fromEntries((state.raw.authStrengths || []).map((s) => [s.id, s]));
-  const res = evaluate(state.raw.policies || [], state.whatIf, { strengthById, namedLocations: state.raw.namedLocations || [] });
+  const w = { ...state.whatIf };
+  if (w.userType === 'agent') {
+    const a = state.results.agents.agents.find((x) => x.id === w.agentId) || state.results.agents.agents[0];
+    const bp = (state.raw.agentBlueprints || []).find((b) => b.appId === a?.blueprintId);
+    w.agentId = a?.id || '';
+    w.blueprintIds = [bp?.id, a?.blueprintId].filter(Boolean);
+  }
+  const res = evaluate(state.raw.policies || [], w, { strengthById, namedLocations: state.raw.namedLocations || [], agentUserIds: new Set((state.raw.agentUsers || []).map((u) => u.id)) });
   const tone = { blocked: 'danger', fails: 'danger', open: 'warn', challenge: 'good', allowed: 'good' };
   const outcome = (o, title) => `
     <div class="verdict verdict-${tone[o.verdict]}">
@@ -625,6 +983,7 @@ function runWhatIf() {
 
 function viewReport() {
   return `
+  ${pageHead('Executive report')}
   <div class="intro report-intro">
     <p>A plain-language report for management: answers, scores, priority actions, a 30/60/90-day roadmap, exceptions, crown jewels, data protection and workload identities.</p>
     <div class="btn-row">
@@ -670,8 +1029,10 @@ function aiSummary() {
     exceptions: r.summary.exclusions,
     workload: r.workload.totals,
     dlpControls: r.dlp.controls.map((c) => ({ control: c.title, status: c.status })),
+    agents: { ...r.agents.totals, checks: r.agents.checks.map((c) => ({ check: c.title, status: c.status })) },
+    purview: { imported: !!r.purview.imported, ...r.purview.totals, checks: r.purview.checks.map((c) => ({ check: c.title, status: c.status })) },
     baseline: r.baseline.map((c) => ({ check: c.title, status: c.status })),
-    findings: r.findings.slice(0, 25).map((f) => ({ severity: f.severity, area: AREAS[f.area]?.label, title: f.area === 'locations' ? scrub(f.title.replace(/^[^:]+: /, 'A named location: ')) : scrub(f.title) })),
+    findings: r.findings.slice(0, 30).map((f) => ({ severity: f.severity, area: AREAS[f.area]?.label, title: f.area === 'locations' ? scrub(f.title.replace(/^[^:]+: /, 'A named location: ')) : scrub(f.title) })),
   };
 }
 
@@ -679,12 +1040,15 @@ const AI_PROMPTS = [
   'Summarise our posture for the leadership team in five bullet points.',
   'Which exceptions should we remove first, and why?',
   'How should Conditional Access support our Purview DLP project?',
+  'How do we govern our AI agents with Conditional Access and Agent ID?',
+  'What should we do so Copilot and agents respect our sensitivity labels?',
   'Give me a 90-day plan to fix the top issues without breaking business apps.',
   'Explain why excluding SAML apps from MFA is risky.',
 ];
 
 function viewAi() {
   return `
+  ${pageHead('Ask AI')}
   <div class="intro"><p>Ask questions about this assessment. Optional and powered by Cloudflare Workers AI (free tier).</p>
   <p class="muted small">Sent with each question: scores, counts and finding titles only, with names removed. No user names, UPNs, IDs or IP ranges leave your browser. Answers can be wrong: verify before acting.</p></div>
   <div class="card chat">
@@ -800,7 +1164,19 @@ function exportCsv(kind) {
     workload: [r.workload.apps, [
       { label: 'App', value: 'name' }, { label: 'App ID', value: 'appId' }, { label: 'Secrets', value: 'secrets' }, { label: 'Certificates', value: 'certificates' },
       { label: 'Expired', value: 'expired' }, { label: 'Expiring in 30 days', value: 'expiringSoon' }, { label: 'Secrets over 1 year', value: 'longLivedSecrets' },
-      { label: 'Multi-tenant', value: (a) => (a.multiTenant ? 'Yes' : 'No') }, { label: 'Dormant', value: (a) => (a.dormant ? 'Yes' : '') }, { label: 'Last used', value: 'lastUsed' }]],
+      { label: 'Multi-tenant', value: (a) => (a.multiTenant ? 'Yes' : 'No') }, { label: 'Dormant', value: (a) => (a.dormant ? 'Yes' : '') }, { label: 'Last used', value: 'lastUsed' },
+      { label: 'Critical permissions', value: (a) => a.permissions.critical.join('; ') }, { label: 'High permissions', value: (a) => a.permissions.high.join('; ') }, { label: 'Privileged roles', value: (a) => a.permissions.roles.join('; ') }]],
+    agents: [r.agents.agents, [
+      { label: 'Agent', value: 'name' }, { label: 'Object ID', value: 'id' }, { label: 'Blueprint', value: 'blueprintName' }, { label: 'Publisher', value: 'publisher' },
+      { label: 'Enabled', value: (a) => (a.enabled ? 'Yes' : 'No') }, { label: 'Sponsors', value: (a) => (a.sponsors === null ? 'unknown' : a.sponsorNames.join('; ') || a.sponsors) },
+      { label: 'Risk', value: (a) => (a.risk ? `${a.risk.level} (${a.risk.state})` : '') },
+      { label: 'Critical permissions', value: (a) => a.permissionSummary.critical.join('; ') }, { label: 'High permissions', value: (a) => a.permissionSummary.high.join('; ') },
+      { label: 'Directory roles', value: (a) => a.roles.map((x) => x.name).join('; ') },
+      { label: 'Covered by', value: (a) => a.coveredBy.map((c) => `${c.name} (${STATE_TXT[c.state]})`).join('; ') },
+      { label: 'Excluded from', value: (a) => a.excludedBy.map((c) => c.name).join('; ') },
+      { label: 'Agent user accounts', value: (a) => a.agentUsers.map((u) => u.upn).join('; ') },
+      { label: 'Issues', value: (a) => a.issues.map((i) => `[${i.severity}] ${i.text}`).join(' | ') },
+      { label: 'Owner (fill in)', value: () => '' }, { label: 'Decision (fill in)', value: () => '' }]],
   };
   const [rows, cols] = defs[kind];
   download(`entracompass-${kind}-${t}-${stamp()}.csv`, '﻿' + toCsv(rows, cols), 'text/csv');
@@ -846,21 +1222,29 @@ function wireEvents() {
   });
 
   document.addEventListener('click', (e) => {
-    const t = e.target.closest('[data-action],[data-tab],[data-crown],[data-app-filter],[data-exc-verdict],[data-area],[data-prompt],[data-whatif-app],[data-exc-policy]');
+    const t = e.target.closest('[data-action],[data-tab],[data-goto],[data-crown],[data-app-filter],[data-exc-verdict],[data-area],[data-sev],[data-agent-filter],[data-prompt],[data-whatif-app],[data-whatif-agent],[data-exc-policy]');
     if (!t) return;
+    if (t.dataset.action === 'import-purview' || t.dataset.action === 'import-crown') return;
     if (t.dataset.crown) { e.preventDefault(); e.stopPropagation(); toggleCrown(t.dataset.crown); return; }
-    if (t.dataset.tab) { state.tab = t.dataset.tab; render(); return; }
+    if (t.dataset.tab) { goTo(t.dataset.tab); return; }
+    if (t.dataset.goto) { e.preventDefault(); goTo(t.dataset.goto); return; }
+    if (t.dataset.sev) { state.findingSev = t.dataset.sev; render(); return; }
+    if (t.dataset.agentFilter) { state.agentFilter = t.dataset.agentFilter; render(); return; }
+    if (t.dataset.whatifAgent) { state.whatIf = { ...(state.whatIf || defaultWhatIf()), userType: 'agent', agentId: t.dataset.whatifAgent, appId: '00000003-0000-0ff1-ce00-000000000000' }; goTo('whatif'); return; }
     if (t.dataset.appFilter) { state.appFilter = t.dataset.appFilter; state.appLimit = 150; render(); return; }
     if (t.dataset.excVerdict) { state.excVerdict = t.dataset.excVerdict; render(); return; }
     if (t.dataset.area) { state.findingArea = t.dataset.area === state.findingArea ? 'all' : t.dataset.area; render(); return; }
     if (t.dataset.prompt) { askAi(t.dataset.prompt); return; }
-    if (t.dataset.whatifApp) { state.whatIf = { ...(state.whatIf || defaultWhatIf()), appId: t.dataset.whatifApp }; state.tab = 'whatif'; render(); return; }
-    if (t.dataset.excPolicy) { state.excQuery = t.dataset.excPolicy; state.excVerdict = 'all'; state.excKind = 'all'; state.tab = 'exceptions'; render(); return; }
+    if (t.dataset.whatifApp) { state.whatIf = { ...(state.whatIf || defaultWhatIf()), userType: 'member', appId: t.dataset.whatifApp }; goTo('whatif'); return; }
+    if (t.dataset.excPolicy) { state.excQuery = t.dataset.excPolicy; state.excVerdict = 'all'; state.excKind = 'all'; goTo('exceptions'); return; }
     switch (t.dataset.action) {
       case 'toggle-setup-help': e.preventDefault(); $('setup-help').classList.toggle('hidden'); break;
       case 'demo': loadDemo(); break;
       case 'rescan': runScan(); break;
       case 'signout': signOut(); break;
+      case 'theme': toggleTheme(); break;
+      case 'clear-purview': clearPurview(); break;
+      case 'export-agents': exportCsv('agents'); break;
       case 'more-apps': state.appLimit += 300; render(); break;
       case 'export-findings': exportCsv('findings'); break;
       case 'export-apps': exportCsv('apps'); break;
@@ -878,7 +1262,17 @@ function wireEvents() {
   document.addEventListener('change', (e) => {
     const t = e.target;
     if (t.dataset?.action === 'import-crown' && t.files?.[0]) { importCrown(t.files[0]); t.value = ''; return; }
-    if (t.closest('#whatif-form')) { readWhatIfForm(); runWhatIf(); return; }
+    if (t.dataset?.action === 'import-purview' && t.files?.[0]) { importPurview(t.files[0]); t.value = ''; return; }
+    if (t.closest('#whatif-form')) {
+      readWhatIfForm();
+      if (t.dataset.rerender) {
+        // Switching between people and agents changes the form fields.
+        const w = state.whatIf;
+        if (w.userType === 'agent' && !w.agentId) w.agentId = state.results.agents.agents[0]?.id || '';
+        render();
+      } else runWhatIf();
+      return;
+    }
     if (t.dataset?.input === 'excKind') { state.excKind = t.value; render(); }
   });
 
@@ -886,7 +1280,7 @@ function wireEvents() {
   let searchTimer;
   document.addEventListener('input', (e) => {
     const key = e.target.dataset?.input;
-    if (key !== 'appQuery' && key !== 'excQuery') return;
+    if (key !== 'appQuery' && key !== 'excQuery' && key !== 'findingQuery') return;
     state[key] = e.target.value;
     clearTimeout(searchTimer);
     searchTimer = setTimeout(() => {
@@ -895,6 +1289,36 @@ function wireEvents() {
       const el = document.querySelector(`[data-input="${key}"]`);
       if (el) { el.focus(); el.setSelectionRange(pos, pos); }
     }, 200);
+  });
+
+  // Drag and drop a Purview export onto the import card.
+  document.addEventListener('dragover', (e) => {
+    const zone = e.target.closest?.('[data-drop="purview"]');
+    if (!zone) return;
+    e.preventDefault();
+    zone.classList.add('dragging');
+  });
+  document.addEventListener('dragleave', (e) => {
+    e.target.closest?.('[data-drop="purview"]')?.classList.remove('dragging');
+  });
+  document.addEventListener('drop', (e) => {
+    const zone = e.target.closest?.('[data-drop="purview"]');
+    if (!zone) return;
+    e.preventDefault();
+    zone.classList.remove('dragging');
+    const file = e.dataTransfer?.files?.[0];
+    if (file) importPurview(file);
+  });
+
+  // Keyboard: arrow keys move through the section navigation.
+  $('tabs').addEventListener('keydown', (e) => {
+    if (!['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight'].includes(e.key)) return;
+    const items = [...$('tabs').querySelectorAll('.nav-item')];
+    const i = items.indexOf(document.activeElement);
+    if (i < 0) return;
+    e.preventDefault();
+    const next = items[(i + (e.key === 'ArrowDown' || e.key === 'ArrowRight' ? 1 : -1) + items.length) % items.length];
+    next.focus();
   });
 
   document.addEventListener('submit', (e) => {
@@ -913,6 +1337,7 @@ function wireEvents() {
 
 async function boot() {
   wireEvents();
+  paintThemeButtons();
   if (ss.get(KEYS.demo)) { loadDemo(); return; }
   const cfg = loadConfig();
   if (!cfg) { show('landing'); return; }

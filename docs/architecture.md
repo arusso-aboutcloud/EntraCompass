@@ -24,12 +24,15 @@ EntraCompass is a static single-page application. Everything that touches tenant
 | `src/collect.js` | Which Graph calls are made, in what order; records success or failure of each source |
 | `src/policy.js` | Pure helpers that describe one Conditional Access policy (scope, grant, session, conditions) |
 | `src/analyzer.js` | Pure function `analyze(raw, options)` that produces findings, scores and answers |
+| `src/agents.js` | Pure analysis of AI agents (Entra Agent ID), Conditional Access for agents, agent risk, and application / delegated permissions and admin roles of agents and apps |
+| `src/purview.js` | Parser for the optional Purview export, and Purview checks cross-referenced with Conditional Access |
 | `src/whatif.js` | Pure function `evaluate(policies, scenario)`, a simplified Conditional Access evaluator |
 | `src/report.js` | Builds the self-contained executive report HTML |
 | `src/knowledge.js` | Well-known app IDs, privileged role IDs, documentation links |
 | `src/demo-data.js` | Fictional sample tenant used by demo mode and by the unit tests |
 | `functions/ai/ask.js` | AI endpoint: origin check, rate limit, input filters, prompt, streaming |
-| `infra/New-EntraCompassApp.ps1` | Creates the customer's app registration |
+| `infra/New-EntraCompassApp.ps1` | Creates the customer's app registration (`-IncludeOptional` adds the agent and Purview read permissions) |
+| `infra/Export-PurviewForEntraCompass.ps1` | Read-only export of DLP policies and rules, sensitivity labels and label policies, for loading in the Purview view |
 
 ## Scan pipeline
 
@@ -50,23 +53,34 @@ EntraCompass is a static single-page application. Everything that touches tenant
    | User and guest counts | `GET /users/$count` | `Directory.Read.All` |
    | Users, groups and service principals named in policies | `POST /directoryObjects/getByIds` (1,000 IDs per call) | `Directory.Read.All` |
    | Group sizes | `GET /groups/{id}/transitiveMembers/$count`, only for groups referenced by policies, 4 in parallel | `Directory.Read.All` |
+   | Agent identities and sponsors | `GET beta/servicePrincipals/microsoft.graph.agentIdentity?$expand=sponsors` | `AgentIdentity.Read.All` (optional) |
+   | Agent blueprints | `GET beta/servicePrincipals/microsoft.graph.agentIdentityBlueprintPrincipal` | `AgentIdentity.Read.All` (optional) |
+   | Agent user accounts | `GET beta/users/microsoft.graph.agentUser` | `Directory.Read.All` |
+   | Risky agents | `GET beta/identityProtection/riskyAgents` | `IdentityRiskyAgent.Read.All` (optional) |
+   | Application permissions | `GET /servicePrincipals/{resource}/appRoleAssignedTo` for Microsoft Graph, Exchange Online and SharePoint Online (3 paged calls) | `Application.Read.All` |
+   | Delegated grants | `GET /oauth2PermissionGrants` | `Directory.Read.All` |
+   | Directory role assignments | `GET /roleManagement/directory/roleAssignments` | `Directory.Read.All` |
+   | Sensitivity labels | `GET beta/me/security/informationProtection/sensitivityLabels` | `InformationProtectionPolicy.Read` (optional) |
 
-   Each source is recorded as succeeded or failed with a reason. A failed optional source (for example sign-in activity without P1) disables only the checks that depend on it, and the UI and report say so.
+   Each source is recorded as succeeded or failed with a reason. Sources marked optional (agent, risk and label APIs, sign-in activity) do not trigger the "partial data" warning; the related view explains how to enable them. A failed optional source (for example sign-in activity without P1) disables only the checks that depend on it, and the UI and report say so.
 3. **Analyse** (`analyzer.js`). A pure function of the collected data plus the crown-jewel tags. It builds indexes, then:
    - classifies each enterprise app (App Proxy, SAML, password SSO, Microsoft, in-house, SaaS, managed identity) and computes its coverage from enabled policies;
    - lists every exclusion and gives it a verdict (gap, review, cleanup, stale, justified);
-   - checks named locations, workload identity credentials, identity-side DLP controls and a modern baseline;
+   - checks named locations, workload identity credentials and permissions, identity-side DLP controls and a modern baseline;
+   - inventories AI agents and checks them against an agent baseline (agent policies, risk, allow-list, agent users, sponsors, least privilege);
+   - checks Purview labels and, when an export is loaded, DLP locations against Conditional Access;
    - turns all of that into findings with severity, business impact and action;
-   - scores six areas and answers nine management questions.
+   - scores seven areas and answers eleven management questions.
+   Agent, agent-user and workload identity policies are kept apart from user policies, so they never count as MFA coverage for people.
 4. **Present.** Tabs, the what-if engine and the report are views over the analysis result. Changing crown-jewel tags re-runs the analysis locally; no new Graph calls.
 
 ## Scoring
 
-Each area (access coverage, exceptions, data protection, workload identities, named locations, crown jewels) starts at 100 and loses points per finding: critical 30, high 15, medium 7, low 3. The overall score is a weighted average (25, 20, 20, 15, 10, 10 percent). The crown-jewel area is left out until at least one app is tagged. Ratings: 85+ Strong, 65+ Fair, 40+ Weak, below 40 At risk.
+Each area (access coverage, exceptions, data protection and Purview, workload identities, AI agents, named locations, crown jewels) starts at 100 and loses points per finding: critical 30, high 15, medium 7, low 3. The overall score is a weighted average (22, 18, 18, 12, 12, 8, 10 percent). The crown-jewel area is left out until at least one app is tagged, and the AI agents area while no agents are found. Purview checks that need an export are "not assessed" and do not affect the score. Ratings: 85+ Strong, 65+ Fair, 40+ Weak, below 40 At risk.
 
 ## What-if engine
 
-`whatif.js` follows the documented evaluation model: a policy applies when every assignment and condition matches; exclusions win over inclusions; any applying block wins; otherwise every applying policy's grant must be satisfied. It evaluates users, groups, roles, guests, applications (including the Office 365 group), named and trusted locations, platforms, client app types and risk levels. Device filters, authentication flows and insider risk are reported as "not evaluated". It shows the outcome with enforced policies and, separately, with report-only policies switched on.
+`whatif.js` follows the documented evaluation model: a policy applies when every assignment and condition matches; exclusions win over inclusions; any applying block wins; otherwise every applying policy's grant must be satisfied. It evaluates users, groups, roles, guests, applications (including the Office 365 group), named and trusted locations, platforms, client app types, sign-in and user risk, authentication flows (device code, authentication transfer) and insider risk. It also evaluates AI agents acting on their own (agent policies only, by agent, blueprint and agent risk) and agent user accounts (agent-user policies only). Device filters, application filters and agent attribute filters are reported as "not evaluated". It shows the outcome with enforced policies and, separately, with report-only policies switched on.
 
 ## Hosting and delivery
 

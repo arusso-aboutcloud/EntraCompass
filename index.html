@@ -4,12 +4,14 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>EntraCompass - Conditional Access Business Posture</title>
-  <meta name="description" content="Assess Microsoft Entra Conditional Access from a business, DLP and security standpoint: exceptions, business app impact, named locations, workload identities, what-if, and an executive report. Browser-only and read-only." />
+  <meta name="description" content="Assess Microsoft Entra Conditional Access from a business, Purview DLP and security standpoint: exceptions, business app impact, AI agents, workload identities, named locations, what-if, and an executive report. Browser-only and read-only." />
+  <meta name="theme-color" content="#08080f" />
+  <script src="/theme.js"></script>
   <link rel="canonical" href="https://entracompass.aboutcloud.io" />
   <meta property="og:type" content="website" />
   <meta property="og:url" content="https://entracompass.aboutcloud.io" />
   <meta property="og:title" content="EntraCompass - Conditional Access Business Posture" />
-  <meta property="og:description" content="Which business apps sit outside protection, which exceptions are justified, and what breaks if you tighten. Executive report included. Browser-only." />
+  <meta property="og:description" content="Which business apps and AI agents sit outside protection, which exceptions are justified, whether DLP reaches Copilot, and what breaks if you tighten. Executive report included. Browser-only." />
   <meta property="og:site_name" content="aboutcloud.io" />
   <link rel="icon" href="/aboutcloud-favicon.ico" sizes="any" />
   <link rel="icon" type="image/png" href="/aboutcloud-icon-256.png" />
@@ -33,17 +35,17 @@
           <div class="eyebrow">Conditional Access posture, for the business</div>
           <h1>EntraCompass</h1>
           <p class="lead">
-            Find out which business applications sit outside protection, which exceptions are justified,
-            what would break if you tighten, and how well company data is protected on unmanaged devices.
+            Find out which business applications and AI agents sit outside protection, which exceptions are justified,
+            what would break if you tighten, and whether your Purview DLP really reaches the data.
             Then hand management a clear report.
           </p>
           <ul class="hero-points">
             <li><b>Business apps first.</b> SAML, App Proxy and SaaS apps mapped against every policy.</li>
             <li><b>Exception inventory.</b> Every exclusion classified: gap, review, cleanup, stale or justified.</li>
-            <li><b>DLP lens.</b> Session controls, managed devices, authentication contexts, guests.</li>
-            <li><b>Named locations and workload identities</b> checked for hidden bypasses.</li>
-            <li><b>What-if.</b> Test a sign-in scenario before you change a policy.</li>
-            <li><b>Executive report</b> that answers management questions in plain language.</li>
+            <li><b>AI agents.</b> Entra Agent ID inventory, Conditional Access for agents, agent risk, sponsors and permissions. <span class="new-tag">New</span></li>
+            <li><b>Purview and DLP.</b> Sensitivity labels, DLP locations including Copilot, cross-checked with Conditional Access. <span class="new-tag">New</span></li>
+            <li><b>Workload identities</b> and <b>named locations</b> checked for hidden bypasses and over-privileged apps.</li>
+            <li><b>What-if</b> for people, guests and agents, and an <b>executive report</b> in plain language.</li>
           </ul>
           <p class="privacy-note">
             Runs entirely in your browser. Read-only Microsoft Graph access through your own app registration (PKCE, no secrets).
@@ -61,6 +63,8 @@
               <li>API permissions &gt; Microsoft Graph &gt; Delegated:
                 <code>Policy.Read.All</code>, <code>Application.Read.All</code>, <code>Directory.Read.All</code>,
                 <code>AuditLog.Read.All</code>, <code>User.Read</code>. Then <b>Grant admin consent</b>.</li>
+              <li>Optional, for the agent and Purview views: <code>AgentIdentity.Read.All</code>, <code>IdentityRiskyAgent.Read.All</code>,
+                <code>InformationProtectionPolicy.Read</code>. Without them those checks run with less detail.</li>
               <li>Copy the Application (client) ID and Directory (tenant) ID below.</li>
             </ol>
             <p class="muted small">Or run <code>infra/New-EntraCompassApp.ps1</code> from the GitHub repo to create it for you.</p>
@@ -78,6 +82,7 @@
           <div class="or"><span>or</span></div>
           <button class="btn btn-ghost btn-block" data-action="demo">Explore with sample data</button>
           <p class="muted small center">Sign-in needs a Conditional Access Administrator, Security Reader or Global Reader account.</p>
+          <button class="theme-toggle landing-theme" data-action="theme" aria-label="Switch light or dark theme" title="Switch theme"></button>
         </div>
       </div>
       <footer class="footer">
@@ -106,12 +111,15 @@
           <span id="demo-chip" class="tenant-chip demo hidden">Sample data</span>
         </div>
         <div class="topbar-actions">
+          <button class="theme-toggle" data-action="theme" aria-label="Switch light or dark theme" title="Switch theme"></button>
           <button class="btn btn-ghost btn-sm" data-action="rescan" id="rescan-btn">Re-scan</button>
-          <button class="btn btn-ghost btn-sm" data-action="signout">Sign out</button>
+          <button class="btn btn-ghost btn-sm" data-action="signout" id="signout-btn">Sign out</button>
         </div>
       </header>
-      <nav class="tabs" role="tablist" id="tabs"></nav>
-      <main id="view" class="view"></main>
+      <div class="dash-body">
+        <nav class="sidenav" id="tabs" aria-label="Assessment sections"></nav>
+        <main id="view" class="view" tabindex="-1"></main>
+      </div>
     </section>
   </div>
 
